@@ -10,7 +10,7 @@ import {
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { basename } from 'path';
-import { MockRuntime, MockBreakpoint } from './mockRuntime';
+import { ADERuntime, ADEBreakpoint } from './ADERuntime';
 const { Subject } = require('await-notify');
 
 function timeout(ms: number) {
@@ -38,7 +38,7 @@ export class MockDebugSession extends LoggingDebugSession {
 	private static THREAD_ID = 1;
 
 	// a Mock runtime (or debugger)
-	private _runtime: MockRuntime;
+	private _runtime: ADERuntime;
 
 	private _variableHandles = new Handles<string>();
 
@@ -58,7 +58,7 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.setDebuggerLinesStartAt1(false);
 		this.setDebuggerColumnsStartAt1(false);
 
-		this._runtime = new MockRuntime();
+		this._runtime = new ADERuntime();
 
 		// setup event handlers
 		this._runtime.on('stopOnEntry', () => {
@@ -76,7 +76,7 @@ export class MockDebugSession extends LoggingDebugSession {
 		this._runtime.on('stopOnException', () => {
 			this.sendEvent(new StoppedEvent('exception', MockDebugSession.THREAD_ID));
 		});
-		this._runtime.on('breakpointValidated', (bp: MockBreakpoint) => {
+		this._runtime.on('breakpointValidated', (bp: ADEBreakpoint) => {
 			this.sendEvent(new BreakpointEvent('changed', <DebugProtocol.Breakpoint>{ verified: bp.verified, id: bp.id }));
 		});
 		this._runtime.on('output', (text, filePath, line, column) => {

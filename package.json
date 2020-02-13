@@ -1,12 +1,12 @@
 {
-	"name": "mock-debug",
-	"displayName": "Mock Debug",
-	"version": "0.36.2",
-	"publisher": "andreweinand",
-	"description": "Starter extension for developing debug adapters for VS Code.",
+	"name": "sqf-debugger",
+	"displayName": "SQF Debugger",
+	"version": "0.1",
+	"publisher": "Vindicta-Team",
+	"description": "SQF Debugger for use with Arma Debug Engine.",
 	"author": {
-		"name": "Microsoft Corporation",
-		"email": "aweinand@microsoft.com"
+		"name": "billw2012",
+		"email": "billw2011@gmail.com"
 	},
 	"license": "MIT",
 	"keywords": [
@@ -15,17 +15,17 @@
 	"engines": {
 		"vscode": "^1.42.0"
 	},
-	"icon": "images/mock-debug-icon.png",
+	"icon": "images/sqf-debugger-icon.png",
 	"categories": [
 		"Debuggers"
 	],
 	"private": true,
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Microsoft/vscode-mock-debug.git"
+		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger.git"
 	},
 	"bugs": {
-		"url": "https://github.com/Microsoft/vscode-mock-debug/issues"
+		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger/issues"
 	},
 	"scripts": {
 		"prepublish": "tsc -p ./src",
@@ -39,7 +39,8 @@
 	},
 	"dependencies": {
 		"await-notify": "1.0.1",
-		"vscode-debugadapter": "1.38.0"
+		"vscode-debugadapter": "1.38.0",
+		"yarn": "^1.22.0"
 	},
 	"devDependencies": {
 		"@types/node": "10.12.12",
@@ -54,7 +55,7 @@
 	"main": "./out/extension",
 	"activationEvents": [
 		"onDebug",
-		"onCommand:extension.mock-debug.getProgramName"
+		"onCommand:extension.sqf-debugger.getProgramName"
 	],
 	"contributes": {
 		"breakpoints": [
@@ -64,59 +65,22 @@
 		],
 		"debuggers": [
 			{
-				"type": "mock",
-				"label": "Mock Debug",
+				"type": "sqf",
+				"label": "SQF Debugger",
 				"program": "./out/debugAdapter.js",
 				"runtime": "node",
 				"configurationAttributes": {
-					"launch": {
-						"required": [
-							"program"
-						],
-						"properties": {
-							"program": {
-								"type": "string",
-								"description": "Absolute path to a text file.",
-								"default": "${workspaceFolder}/${command:AskForProgramName}"
-							},
-							"stopOnEntry": {
-								"type": "boolean",
-								"description": "Automatically stop after launch.",
-								"default": true
-							},
-							"trace": {
-								"type": "boolean",
-								"description": "Enable logging of the Debug Adapter Protocol.",
-								"default": true
-							}
-						}
+					"connect": {
+						"required": [],
+						"properties": {}
 					}
 				},
 				"initialConfigurations": [
 					{
-						"type": "mock",
-						"request": "launch",
-						"name": "Ask for file name",
-						"program": "${workspaceFolder}/${command:AskForProgramName}",
-						"stopOnEntry": true
+						"type": "sqf",
+						"request": "connect"
 					}
-				],
-				"configurationSnippets": [
-					{
-						"label": "Mock Debug: Launch",
-						"description": "A new configuration for 'debugging' a user selected markdown file.",
-						"body": {
-							"type": "mock",
-							"request": "launch",
-							"name": "Ask for file name",
-							"program": "^\"\\${workspaceFolder}/\\${command:AskForProgramName}\"",
-							"stopOnEntry": true
-						}
-					}
-				],
-				"variables": {
-					"AskForProgramName": "extension.mock-debug.getProgramName"
-				}
+				]
 			}
 		]
 	}
