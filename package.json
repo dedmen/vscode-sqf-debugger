@@ -1,73 +1,31 @@
 {
 	"name": "sqf-debugger",
-	"displayName": "SQF Debugger",
-	"version": "0.1.0",
-	"publisher": "Vindicta-Team",
-	"description": "SQF Debugger for use with Arma Debug Engine.",
+	"displayName": "sqf-debugger",
+	"description": "",
 	"author": {
 		"name": "billw2012",
 		"email": "billw2011@gmail.com"
 	},
 	"license": "MIT",
-	"keywords": [
-		"multi-root ready"
-	],
+	"version": "0.0.1",
 	"engines": {
 		"vscode": "^1.42.0"
 	},
-	"icon": "images/sqf-debugger-icon.png",
 	"categories": [
 		"Debuggers"
 	],
 	"private": true,
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger.git"
-	},
-	"bugs": {
-		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger/issues"
-	},
-	"scripts": {
-		"prepublish": "tsc -p ./src",
-		"compile": "tsc -p ./src",
-		"tslint": "tslint ./src/**/*.ts",
-		"watch": "tsc -w -p ./src",
-		"test": "mocha -u tdd ./out/tests/",
-		"postinstall": "node ./node_modules/vscode/bin/install",
-		"package": "vsce package",
-		"publish": "vsce publish"
-	},
-	"dependencies": {
-		"await-notify": "1.0.1",
-		"vscode-debugadapter": "1.38.0",
-		"yarn": "^1.22.0"
-	},
-	"devDependencies": {
-		"@types/node": "10.12.12",
-		"@types/mocha": "5.2.7",
-		"typescript": "3.5.3",
-		"mocha": "6.2.0",
-		"vscode": "1.1.36",
-		"vscode-debugadapter-testsupport": "1.40.1",
-		"tslint": "5.18.0",
-		"vsce": "1.66.0"
-	},
-	"main": "./out/extension",
-	"activationEvents": [
-		"onDebug",
-		"onCommand:extension.sqf-debugger.getProgramName"
-	],
 	"contributes": {
 		"breakpoints": [
 			{
-				"language": "markdown"
+				"language": "sqf"
 			}
 		],
 		"debuggers": [
 			{
 				"type": "sqf",
 				"label": "SQF Debugger",
-				"program": "./out/debugAdapter.js",
+				"program": "./out/adapter.js",
 				"runtime": "node",
 				"configurationAttributes": {
 					"connect": {
@@ -77,11 +35,38 @@
 				},
 				"initialConfigurations": [
 					{
+						"name": "connect",
 						"type": "sqf",
-						"request": "connect"
+						"request": "launch"
 					}
 				]
 			}
 		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"lint": "eslint src --ext ts",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile && npm run lint",
+		"test": "node ./out/test/runTest.js"
+	},
+	"dependencies": {
+		"await-notify": "1.0.1",
+		"vscode-debugadapter": "1.38.0"
+	},
+	"devDependencies": {
+		"@types/glob": "^7.1.1",
+		"@types/mocha": "^7.0.1",
+		"@types/node": "^12.11.7",
+		"@types/vscode": "^1.42.0",
+		"eslint": "^6.8.0",
+		"@typescript-eslint/parser": "^2.18.0",
+		"@typescript-eslint/eslint-plugin": "^2.18.0",
+		"glob": "^7.1.6",
+		"mocha": "^7.0.1",
+		"typescript": "^3.7.5",
+		"vscode-test": "^1.3.0",
+		"vscode-debugadapter-testsupport": "1.40.1"
 	}
 }

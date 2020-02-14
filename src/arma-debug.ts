@@ -86,7 +86,7 @@ export class ArmaDebug extends EventEmitter {
 
     messageQueue: IClientMessage[] = [];
 
-    client: net.Socket | null;
+    client: net.Socket | null = null;
 
     callStack?: ICallStackItem[];
 
@@ -117,7 +117,7 @@ export class ArmaDebug extends EventEmitter {
             this.client = null;
 
             setTimeout(() => this.connect(), 1000);
-        })
+        });
     }
 
     addBreakpoint(breakpoint: IBreakpointRequest) {
@@ -133,13 +133,13 @@ export class ArmaDebug extends EventEmitter {
     }
 
     clearBreakpoints(path: string) {
-        Object.keys(this.breakpoints).forEach(brid => {
-            let breakpoint = this.breakpoints[brid] as IBreakpointRequest;
+        Object.keys(this.breakpoints).forEach((value:string, index:number) => {
+            let breakpoint = this.breakpoints[index] as IBreakpointRequest;
             if (breakpoint.filename && breakpoint.filename.toLowerCase() === path.toLowerCase()) {
                 this.removeBreakpoint(breakpoint);
-                delete this.breakpoints[brid];
+                delete this.breakpoints[index];
             }
-        })
+        });
     }
 
     continue(type: ContinueExecutionType = ContinueExecutionType.Continue) {
@@ -148,14 +148,14 @@ export class ArmaDebug extends EventEmitter {
 
     getVariable(scope: number, name: string): Promise<any> {
         return new Promise((resolve, reject) => {
-            let request: { scope?: number; name: string; } = { name }
+            let request: { scope?: number; name: string; } = { name };
             if (scope) {
-                request.scope = scope
+                request.scope = scope;
             }
 
             this.once('variable', data => resolve(data));
             this.sendCommand(Commands.GetVariable, request);
-        })
+        });
     }
 
     getVariables(scope: number, ): Promise<any> {
@@ -163,7 +163,7 @@ export class ArmaDebug extends EventEmitter {
             this.once('variables', data => resolve(data));
 
             this.sendCommand(Commands.GetAvailableVariables, { scope });
-        })
+        });
     }
 
     getCurrentVariables() {
@@ -175,12 +175,12 @@ export class ArmaDebug extends EventEmitter {
     }
 
     private l(message: string) {
-        this.emit('log', message)
+        this.emit('log', message);
     }
 
     private receiveMessage(message: IRemoteMessage) {
-        this.l("Received:")
-        this.l(JSON.stringify(message))
+        this.l("Received:");
+        this.l(JSON.stringify(message));
 
         switch (message.command) {
             case RemoteCommands.VersionInfo:
@@ -200,7 +200,7 @@ export class ArmaDebug extends EventEmitter {
                         if (c.compiled && c.compiled.length > 0) {
                             c.fileOffset = c.compiled[0].fileOffset;
                         }
-                    })
+                    });
                 }
 
                 if (message.instruction && this.callStack && !this.callStack[this.callStack.length - 1].fileOffset) {
@@ -214,13 +214,13 @@ export class ArmaDebug extends EventEmitter {
 
             case RemoteCommands.VariableReturn:
 
-                this.emit('variable', message.data)
+                this.emit('variable', message.data);
 
                 break;
 
             case RemoteCommands.VariablesReturn:
 
-                this.emit('variables', message.data)
+                this.emit('variables', message.data);
 
                 break;
         }
@@ -230,17 +230,17 @@ export class ArmaDebug extends EventEmitter {
         return this.send({
             command,
             data
-        })
+        });
     }
 
     private send(data: IClientMessage) {
-        if (!this.connected || (data.command != Commands.Hello && !this.initialized)) {
-            this.messageQueue.push(data)
-            return
+        if (!this.connected || (data.command !== Commands.Hello && !this.initialized)) {
+            this.messageQueue.push(data);
+            return;
         }
 
-        this.l("Send:")
-        this.l(JSON.stringify(data))
+        this.l("Send:");
+        this.l(JSON.stringify(data));
         if (this.client) {
             this.client.write(JSON.stringify(data));
         };
