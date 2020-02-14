@@ -1,7 +1,7 @@
 {
 	"name": "sqf-debugger",
 	"displayName": "SQF Debugger",
-	"version": "0.1",
+	"version": "0.1.0",
 	"publisher": "Vindicta-Team",
 	"description": "SQF Debugger for use with Arma Debug Engine.",
 	"author": {
