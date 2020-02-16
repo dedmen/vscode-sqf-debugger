@@ -15,7 +15,43 @@
 		"Debuggers"
 	],
 	"private": true,
+	"activationEvents": [
+		"onDebug"
+	],
+	"main": "./out/extension.js",
 	"contributes": {
+		"configuration": {
+			"title": "SQF Debugger",
+			"properties": {
+				"sqf-debugger.missionRoot": {
+					"type": "string",
+					"default": "",
+					"description": "Absolute path to the mission root directory"
+				}
+			}
+		},
+		"languages": [
+			{
+				"id": "sqf",
+				"aliases": [
+					"SQF",
+					"sqf"
+				],
+				"extensions": [
+					".sqf",
+					".sqs",
+					".tm4"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "sqf",
+				"scopeName": "source.sqf",
+				"path": "./syntaxes/SQF.tmLanguage"
+			}
+		],
 		"breakpoints": [
 			{
 				"language": "sqf"
@@ -28,16 +64,32 @@
 				"program": "./out/adapter.js",
 				"runtime": "node",
 				"configurationAttributes": {
-					"connect": {
-						"required": [],
-						"properties": {}
+					"launch": {
+						"required": [
+							"missionRoot",
+							"scriptPrefix"
+						],
+						"properties": {
+							"missionRoot": {
+								"type": "string",
+								"default": "${workspaceFolder}",
+								"description": "Absolute path to the mission root directory"
+							},
+							"scriptPrefix": {
+								"type": "string",
+								"default": "mpmissions\\__cur_mp.altis",
+								"description": "Ingame script prefix"
+							}
+						}
 					}
 				},
 				"initialConfigurations": [
 					{
 						"name": "connect",
 						"type": "sqf",
-						"request": "launch"
+						"request": "launch",
+						"missionRoot": "${workspaceFolder}",
+						"scriptPrefix": "mpmissions\\__cur_mp.altis"
 					}
 				]
 			}
@@ -53,7 +105,8 @@
 	},
 	"dependencies": {
 		"await-notify": "1.0.1",
-		"vscode-debugadapter": "1.38.0"
+		"vscode-debugadapter": "1.38.0",
+		"@types/vscode": "^1.42.0"
 	},
 	"devDependencies": {
 		"@types/glob": "^7.1.1",

@@ -61,10 +61,11 @@ interface IClientMessage {
     data: any;
 }
 
-interface ICallStackItem {
+export interface ICallStackItem {
     contentSample: string;
     fileName?: string;
     ip: string;
+    lastInstruction: ICompiledInstruction,
     type: string;
     variables: {
         [key: string]: {
@@ -148,7 +149,7 @@ export class ArmaDebug extends EventEmitter {
 
     getVariable(scope: number, name: string): Promise<any> {
         return new Promise((resolve, reject) => {
-            let request: { scope?: number; name: string; } = { name };
+            let request: { scope?: number; name: string[]; } = { name: [name] };
             if (scope) {
                 request.scope = scope;
             }

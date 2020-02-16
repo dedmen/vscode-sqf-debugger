@@ -1,4 +1,7 @@
 import * as path from 'path';
+import { missionRoot } from './extension';
+
+import * as vscode from 'vscode';
 
 import {
 	DebugSession,
@@ -9,11 +12,12 @@ import {
 
 import { DebugProtocol } from 'vscode-debugprotocol';
 // import { RptMonitor, RptError, RptMessage } from './debugger';
-import { ArmaDebug } from './arma-debug';
+import { ArmaDebug, ICallStackItem } from './arma-debug';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
-	rptPath?: string
-	missionRoot?: string
+	//rptPath?: string
+	missionRoot?: string,
+	scriptPrefix?: string
 }
 
 export class SQFDebug extends DebugSession {
@@ -23,13 +27,14 @@ export class SQFDebug extends DebugSession {
 	//private monitor: RptMonitor;
 	private debugger: ArmaDebug | null = null;
 
-	private missionRoot: string | null = null;
+	private missionRoot: string = '';
+	private scriptPrefix: string = 'mpmissions\\__cur_mp.altis';
 
 	private variables: { name: string, scope: number }[] = [];
 
 	public constructor() {
 		super();
-
+		this.log('Constructing sqf debugger');
 		this.setDebuggerLinesStartAt1(true);
 		this.setDebuggerColumnsStartAt1(false);
 	}
@@ -39,10 +44,10 @@ export class SQFDebug extends DebugSession {
 		// we request them early by sending an 'initializeRequest' to the frontend.
 		// The frontend will end the configuration sequence by calling 'configurationDone' request.
 		this.sendEvent(new InitializedEvent());
-		this.sendEvent(new OutputEvent('Initializing sqf debugger\n', 'stdout'));
-		if(response.body) {
-			response.body.supportsConfigurationDoneRequest = true;
-		}
+		this.log('Initializing sqf debugger');
+		//if(response.body) {
+			//response.body.supportsConfigurationDoneRequest = true;
+		//}
 
 		this.debugger = new ArmaDebug();
 		this.debugger.connect();
@@ -50,10 +55,12 @@ export class SQFDebug extends DebugSession {
 			this.sendEvent(new StoppedEvent('breakpoint', SQFDebug.THREAD_ID));
 		});
 		this.debugger.on('log', (text) => {
-			this.sendEvent(new OutputEvent(text + '\n', 'stdout'));
+			this.log(text);
 		});
 
 		this.sendResponse(response);
+
+		//let config = vscode.workspace.getConfiguration('sqf-debugger');
 	}
 
 	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
@@ -66,19 +73,23 @@ export class SQFDebug extends DebugSession {
 	}
 
 	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
-		let localAppData = process.env['LOCALAPPDATA'];
-		if(!localAppData) {
-			this.sendEvent(new OutputEvent("LOCALAPPDATA environment variable is not defined"));
-			return;
-			//throw "LOCALAPPDATA environment variable is not defined";
-		};
-
-		let defaultPath = path.join(localAppData, 'Arma 3');
+		// let localAppData = process.env['LOCALAPPDATA'];
+		// if(!localAppData) {
+		// 	this.sendEvent(new OutputEvent("LOCALAPPDATA environment variable is not defined"));
+		// 	return;
+		// 	//throw "LOCALAPPDATA environment variable is not defined";
+		// };
+		//response.
+		this.log(`Launching...`);
+		//let defaultPath = path.join(localAppData, 'Arma 3');
 		//let messageFilter: RegExp | null = null;
 		//let errorFilter: RegExp | null = null;
 
-		this.missionRoot = args.missionRoot || ".";
-
+		
+		this.missionRoot = args.missionRoot?.toLowerCase() || "";
+		this.scriptPrefix = args.scriptPrefix?.toLowerCase() || "";
+		
+		//this.log(`Mission Root set to ${this.missionRoot}`);
 		// try {
 		// 	messageFilter = args.messageFilter ? new RegExp(args.messageFilter, 'i') : null;
 		// } catch (ex) {
@@ -109,40 +120,53 @@ export class SQFDebug extends DebugSession {
 		// });
 
 		this.sendResponse(response);
+
+		this.sendEvent(new InitializedEvent());
 	}
 
 	protected setBreakPointsRequest (response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments) {
 		// Remove previously set breakpoints for this file
 		if(!args.source.path) {
-			this.sendEvent(new OutputEvent("args.source.path not set"));
+			this.log("args.source.path not set");
 			return;
 		}
 		if(!args.breakpoints) {
-			this.sendEvent(new OutputEvent("args.breakpoints not set"));
+			this.log("args.breakpoints not set");
 			return;
 		}
 
-		this.sendEvent(new OutputEvent("Setting breakpoint..."));
+		//let missionRoot = ''; //workspace.getConfiguration('sqf-debugger').get<string>('missionRoot') ?? '';
+		let path = args.source.path.toLowerCase();
+		if(path.startsWith(this.missionRoot)) {
+			path = path.substr(this.missionRoot.length);
+		}
+		path = `${this.scriptPrefix}${path}`;
 
-		let id = args.source.path;
+		this.log(`Setting breakpoints for ${path}...`);
 
-		this.debugger?.clearBreakpoints(id);
-		this.debugger?.clearBreakpoints(id.toLowerCase().replace(this.missionRoot?.toLowerCase() || '', ''));
+		//let id = args.source.path;
+
+		// Lets try and remove the mission path from the start:
+		//id.inde
+
+		this.debugger?.clearBreakpoints(path);
+		// this.debugger?.clearBreakpoints(id.toLowerCase().replace(this.missionRoot, ''));
 
 		// Build new breakpoints
 		let breakpoints: DebugProtocol.Breakpoint[] = args.breakpoints.map(breakpoint => {
+			this.log(`Adding breakpoint at ${path}:${breakpoint.line}`);
+			// let id = this.debugger?.addBreakpoint({
+			// 	action: { code: null, basePath: null, type: 2 },
+			// 	condition: null,
+			// 	filename: path && path.toLowerCase() || null,
+			// 	line: breakpoint.line - 1
+			// });
+
 			let id = this.debugger?.addBreakpoint({
 				action: { code: null, basePath: null, type: 2 },
 				condition: null,
-				filename: args.source.path && args.source.path.toLowerCase() || null,
-				line: breakpoint.line - 1
-			});
-
-			this.debugger?.addBreakpoint({
-				action: { code: null, basePath: null, type: 2 },
-				condition: null,
-				filename: args.source.path && args.source.path.toLowerCase().replace(this.missionRoot && this.missionRoot.toLowerCase() || '', '') || null,
-				line: breakpoint.line - 1 + 3
+				filename: path,
+				line: breakpoint.line
 			});
 
 			return {
@@ -159,26 +183,35 @@ export class SQFDebug extends DebugSession {
 		this.sendResponse(response);
 	}
 
+	protected getCallstackFrame(srcFrame: ICallStackItem, idx:number) : StackFrame {
+		
+		var sourceFile = srcFrame.lastInstruction.filename.toLowerCase();
+		if(sourceFile.startsWith(this.scriptPrefix)) {
+			sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
+		}
+		var source = new Source(path.basename(sourceFile), sourceFile);
+		return new StackFrame(
+			idx,
+			srcFrame.lastInstruction.name,
+			source,
+			srcFrame.lastInstruction.fileOffset[0],
+			srcFrame.lastInstruction.fileOffset[2]
+		);
+	}
+
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
 		const stk = this.debugger?.getCallStack();
+		
+		if(stk) {
+			this.log(`Stack trace requested`);
+			//let path = this.scriptPrefix;
 
-		response.body = stk && {
-			stackFrames: stk.map((f, i) => {
-				return new StackFrame(
-					i,
-					path.basename(f.fileName || '(unknown)'),
-					new Source(
-						path.basename(f.fileName || '(unknown)'),
-						f.fileName,
-						undefined, undefined,
-						'sqf'
-					),
-					f.fileOffset ? f.fileOffset[0] : undefined
-				);
-			}),
-			totalFrames: stk.length
-		} || null;
-
+			this.log(`Setting breakpoints for ${path}...`);
+			response.body = {
+				stackFrames: stk.map((f, i) => { return this.getCallstackFrame(f, i); }).reverse(),
+				totalFrames: stk.length
+			};
+		};
 		this.sendResponse(response);
 	}
 
@@ -202,36 +235,45 @@ export class SQFDebug extends DebugSession {
 	protected variablesRequest (response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments) {
 		const variables = new Array<DebugProtocol.Variable>();
 
+		this.log(`Variables requested`);
 		if (args.variablesReference >= SQFDebug.VARIABLES_ID) {
+			this.log(`Variables requested 1`);
 			const variable = this.variables[args.variablesReference - SQFDebug.VARIABLES_ID];
 
 			this.debugger?.getVariable(variable.scope, variable.name)
 				.then(data => {
-					variables.push({
-						name: "value",
-						value: data.value,
-						type: data.type,
-						variablesReference: 0
+					(data as any[]).forEach(rval => {
+						variables.push({
+							name: rval.name,
+							value: rval.value.toString(),
+							type: rval.type,
+							variablesReference: 0
+						});
 					});
+
+					response.body = {
+						variables
+					};
+		
+					this.sendResponse(response);
 				});
 
-			return;
 		}
 
 		if (args.variablesReference === 1) {
+			this.log(`Variables requested 2`);
 			const remoteVariables = this.debugger?.getCurrentVariables();
 			if(remoteVariables) {
 				Object.keys(remoteVariables).forEach(name => {
 					const variable = remoteVariables[name];
 					variables.push({
 						name,
-						value: variable.value,
+						value: variable.value.toString(),
 						type: variable.type,
 						variablesReference: 0
 					});
 				});
 			}
-
 
 			response.body = {
 				variables
@@ -241,6 +283,8 @@ export class SQFDebug extends DebugSession {
 		}
 
 		if (args.variablesReference > 1) {
+			this.log(`Variables requested 3`);
+			// args.variablesReference is a scope
 			this.debugger?.getVariables(Math.pow(2, args.variablesReference - 1))
 				.then(vars => {
 					if (vars) {
@@ -256,7 +300,7 @@ export class SQFDebug extends DebugSession {
 
 								variables.push({
 									name,
-									value: undefined,
+									value: '',
 									type: undefined,
 									variablesReference: SQFDebug.VARIABLES_ID + index
 								});
@@ -274,8 +318,13 @@ export class SQFDebug extends DebugSession {
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments) {
+		this.log(`Continue execution requested`);
 		this.debugger?.continue();
 		this.sendResponse(response);
+	}
+
+	protected log(msg:string) {
+		this.sendEvent(new OutputEvent(`${msg}\n`));
 	}
 
 }
