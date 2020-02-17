@@ -49,6 +49,15 @@ enum DebuggerState {
     stepState = 3
 };
 
+export enum VariableScope {
+    Stack = 1,
+    Local = 2,
+    MissionNamespace = 3,
+    UiNamespace = 4,
+    ProfileNamespace = 5,
+    ParsingNamespace = 6
+};
+
 interface IRemoteMessage {
     command: RemoteCommands;
     data: any;
@@ -91,6 +100,12 @@ export interface ICallStackItem {
         2: number;
     };
     compiled: ICompiledInstruction[];
+}
+
+export interface IVariable {
+    name: string;
+    value: string;
+    type: string;
 }
 
 export class ArmaDebug extends EventEmitter {
@@ -161,19 +176,31 @@ export class ArmaDebug extends EventEmitter {
         this.sendCommand(Commands.ContinueExecution, type);
     }
 
-    getVariable(scope: number, name: string): Promise<any> {
+    getVariable(scope: VariableScope, name: string): Promise<IVariable> {
         return new Promise((resolve, reject) => {
-            let request: { scope?: number; name: string[]; } = { name: [name] };
+            let request: { scope?: VariableScope; name: string[]; } = { name: [name] };
             if (scope) {
                 request.scope = scope;
             }
 
-            this.once('variable', data => resolve(data));
+            this.once('variable', data => resolve((data as IVariable[])[0]));
             this.sendCommand(Commands.GetVariable, request);
         });
     }
 
-    getVariables(scope: number, ): Promise<any> {
+    getVariables(scope: VariableScope, names: string[]): Promise<IVariable[]> {
+        return new Promise((resolve, reject) => {
+            let request: { scope?: VariableScope; name: string[]; } = { name: names };
+            if (scope) {
+                request.scope = scope;
+            }
+
+            this.once('variable', data => resolve(data as IVariable[]));
+            this.sendCommand(Commands.GetVariable, request);
+        });
+    }
+
+    getVariablesInScope(scope: VariableScope, ): Promise<any> {
         return new Promise((resolve, reject) => {
             this.once('variables', data => resolve(data));
 
