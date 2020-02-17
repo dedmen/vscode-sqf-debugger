@@ -42,11 +42,23 @@ enum RemoteCommands {
     VariablesReturn = 10
 }
 
+enum DebuggerState {
+    Uninitialized = 0,
+    running = 1,
+    breakState = 2,
+    stepState = 3
+};
+
 interface IRemoteMessage {
     command: RemoteCommands;
     data: any;
     callstack?: ICallStackItem[];
     instruction?: ICompiledInstruction;
+
+    build?: number;
+    version?: string;
+    arch?: string;
+    state?: DebuggerState;
 }
 
 interface ICompiledInstruction {
@@ -134,11 +146,13 @@ export class ArmaDebug extends EventEmitter {
     }
 
     clearBreakpoints(path: string) {
-        Object.keys(this.breakpoints).forEach((value:string, index:number) => {
-            let breakpoint = this.breakpoints[index] as IBreakpointRequest;
+        this.l(`clearing ${JSON.stringify(this.breakpoints)} breakpoints for ${path}`);
+        Object.entries(this.breakpoints).forEach((value: [string, IBreakpointRequest]) => {
+            this.l(`clearing breakpoints for ${path}: ${value}`);
+            let breakpoint = value[1]; //this.breakpoints[index] as IBreakpointRequest;
             if (breakpoint.filename && breakpoint.filename.toLowerCase() === path.toLowerCase()) {
                 this.removeBreakpoint(breakpoint);
-                delete this.breakpoints[index];
+                delete this.breakpoints[+value[0]];
             }
         });
     }
@@ -167,8 +181,8 @@ export class ArmaDebug extends EventEmitter {
         });
     }
 
-    getCurrentVariables() {
-        return this.callStack ? this.callStack[this.callStack.length - 1].variables : null;
+    getStackVariables(frame:number) {
+        return this.callStack ? this.callStack[frame].variables : null;
     }
 
     getCallStack() {
@@ -192,6 +206,7 @@ export class ArmaDebug extends EventEmitter {
                 this.messageQueue = [];
 
                 break;
+
             case RemoteCommands.HaltBreakpoint:
 
                 this.callStack = message.callstack;
@@ -243,7 +258,7 @@ export class ArmaDebug extends EventEmitter {
         this.l("Send:");
         this.l(JSON.stringify(data));
         if (this.client) {
-            this.client.write(JSON.stringify(data));
+            this.client.write(JSON.stringify(data) + '\n');
         };
     }
 }
