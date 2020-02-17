@@ -15,10 +15,6 @@
 		"Debuggers"
 	],
 	"private": true,
-	"activationEvents": [
-		"onDebug"
-	],
-	"main": "./out/extension.js",
 	"contributes": {
 		"configuration": {
 			"title": "SQF Debugger",

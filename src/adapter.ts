@@ -14,6 +14,7 @@ import { DebugProtocol } from 'vscode-debugprotocol';
 // import { RptMonitor, RptError, RptMessage } from './debugger';
 import { ArmaDebug, ICallStackItem, IVariable, VariableScope } from './arma-debug';
 import { resolve } from 'dns';
+import { stringify } from 'querystring';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	//rptPath?: string
@@ -25,7 +26,7 @@ export class SQFDebug extends DebugSession {
 	private static THREAD_ID = 1;
 	private static STACK_VARIABLES_ID = 200;
 	private static VARIABLES_ID = 256;
-	private static VARIABLE_EXPAND_ID = (Number.MAX_SAFE_INTEGER >> 1);
+	private static VARIABLE_EXPAND_ID = 1024 * 1024;
 
 	//private monitor: RptMonitor;
 	private debugger: ArmaDebug | null = null;
@@ -33,7 +34,7 @@ export class SQFDebug extends DebugSession {
 	private missionRoot: string = '';
 	private scriptPrefix: string = '';
 
-	private variables: { name: string, scope: number }[] = [];
+	private variables: { name: string, scope: VariableScope }[] = [];
 
 	public constructor() {
 		super();
@@ -190,7 +191,7 @@ export class SQFDebug extends DebugSession {
 		this.sendResponse(response);
 	}
 
-	protected expandVariable(id:number) : Promise<DebugProtocol.Variable[]>
+	protected expandVariable(id:number) : Promise<DebugProtocol.Variable[] | undefined > | undefined
 	{
 		// Add the variable to our variable index if it isn't there
 		// let index = this.variables.findIndex(v => v.name === name && v.scope === parseInt(scope));
@@ -203,32 +204,117 @@ export class SQFDebug extends DebugSession {
 		const variable = this.variables[id];
 			
 		return this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
-			if(rval.type === "string" && rval.value.startsWith("o_")) {
-				// expand object
-				return this.debugger?.getVariable(VariableScope.MissionNamespace, rval.value + "_oop_parent");
-			} else if(rval.type === "array") {
-				return JSON.parse(rval.value) as string[];
+			if(rval.type === "string" && (rval.value as string).startsWith(ArmaDebug.OOP_PREFIX)) {
+				const objectName = rval.value as string;
+				this.log(`Resolving object ${objectName}`);
+				// get object class name
+				return this.debugger?.getVariable(VariableScope.MissionNamespace, objectName + ArmaDebug.MEMBER_SEPARATOR + ArmaDebug.OOP_PARENT_STR).then(className => {
+					this.log(`Resolved class ${className.value} for object ${objectName}`);
+					// get class member and static member lists
+					return this.debugger?.getVariables(VariableScope.MissionNamespace, [
+								ArmaDebug.OOP_PREFIX + className.value + ArmaDebug.SPECIAL_SEPARATOR + ArmaDebug.MEM_LIST_STR, 
+								ArmaDebug.OOP_PREFIX + className.value + ArmaDebug.SPECIAL_SEPARATOR + ArmaDebug.STATIC_MEM_LIST_STR
+							]).then(members => {
+						// get object and class values for the members
+						//this.log(`Resolved members ${JSON.stringify(members)} for object ${objectName}`);
+						let instanceMembers = (members[0].value as IVariable[]).map(m => {
+							// member list values are like [name, [attribute...]]...
+							let memberName = (m.value as IVariable[])[0].value as string;
+							return objectName + ArmaDebug.MEMBER_SEPARATOR + memberName;
+						});
+						this.log(`Class members for ${objectName}: ${JSON.stringify(instanceMembers)}`);
+						let staticMembers = members[1].value? (members[1].value as IVariable[]).map(m => {
+							// static member list values are like [name, [attribute...]]...
+							let memberName = (m.value as IVariable[])[0].value as string;
+							return ArmaDebug.OOP_PREFIX + className.value + ArmaDebug.STATIC_SEPARATOR + memberName;
+						}) : [];
+						this.log(`Static members for ${objectName}: ${JSON.stringify(staticMembers)}`);
+						return this.debugger?.getVariables(VariableScope.MissionNamespace, instanceMembers.concat(staticMembers)).then(memberValues => {
+							return memberValues.map(memberValue => {
+								// Add the variable to our variable index if it isn't there
+								let index = this.variables.findIndex(v => v.name === memberValue.name && v.scope === VariableScope.MissionNamespace);
+								if (index === -1) {
+									index = this.variables.length;
+									this.variables.push({
+										name: memberValue.name || '', 
+										scope: VariableScope.MissionNamespace
+									});
+								};
+								return this.resolveVariable(
+									index, 
+									VariableScope.MissionNamespace,
+									memberValue.name?.substr(objectName.length + 1) || '',
+									memberValue.type,
+									memberValue.value
+								);
+								// return {
+								// 	name: memberValue.name,
+								// 	value: JSON.stringify(memberValue.value),
+								// 	type: memberValue.type,
+								// 	variablesReference: 0
+								// } as DebugProtocol.Variable;
+							});
+						});
+					});
+				});
+			// } else if(rval.type === "array") {
+			// 	return Promise.resolve((JSON.parse(rval.value) as string[]).map(
+			// 		(val, idx) => { 
+			// 			return {
+			// 				name: idx.toString(), 
+			// 				value: val,
+			// 				type: "",
+			// 				variablesReference: 0
+			// 			};
+			// 		}
+			// 	));
 			} else {
-				return [rval.value];
+				return Promise.resolve([{
+					name: variable.name,
+					value: rval.value,
+					type: rval.type,
+					variablesReference: 0
+				} as DebugProtocol.Variable]);
 			}
 		});
 	}
 
-	protected resolveVariable(id:number, variable:IVariable) : DebugProtocol.Variable 
+	protected indexVariable(name:string, scope:VariableScope) : number {
+		let index = this.variables.findIndex(v => v.name === name && v.scope === scope);
+		if (index < 0) {
+			index = this.variables.length;
+			this.variables.push({
+				name, scope: scope
+			});
+		}
+		return index;
+	}
+	
+	protected resolveVariable(id:number, scope:VariableScope, name:string, type:string, value:string|number|IVariable[]) : DebugProtocol.Variable 
 	{
+		// // Add the variable to our variable index if it isn't there
+		// let index = this.variables.findIndex(v => v.name === variable.name && v.scope === scope);
+		// if (index === -1) {
+		// 	index = this.variables.length;
+		// 	this.variables.push({
+		// 		name: variable.name, 
+		// 		scope
+		// 	});
+		// };
+
 		// Add the variable to our variable index if it isn't there
-		if(variable.type === "string" && variable.value.startsWith("o_")) {
+		if(type === "string" && (value as string).startsWith(ArmaDebug.OOP_PREFIX)) {
 			return {
-				name: variable.name,
-				value: variable.value,
+				name,
+				value: value as string,
 				type: "object",
 				variablesReference: id + SQFDebug.VARIABLE_EXPAND_ID
 			};
 		} else {
 			return {
-				name: variable.name,
-				value: variable.type === "string"? variable.value : JSON.stringify(variable.value),
-				type: variable.type,
+				name,
+				value: type === "string"? value as string : JSON.stringify(value),
+				type,
 				variablesReference: 0
 			};
 		}
@@ -248,11 +334,13 @@ export class SQFDebug extends DebugSession {
 			const variable = this.variables[varIdx];
 			
 			this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
-				return this.expandVariable(varIdx, rval);
+				return this.expandVariable(varIdx);
 			}).then(vars => {
-				response.body = {
-					variables: vars
-				};
+				if(vars) {
+					response.body = {
+						variables: vars
+					};
+				}
 				this.sendResponse(response);
 			});
 		} else if (args.variablesReference >= SQFDebug.VARIABLES_ID) {
@@ -264,7 +352,7 @@ export class SQFDebug extends DebugSession {
 			
 			this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
 				response.body = {
-					variables: [this.resolveVariable(varIdx, rval)]
+					variables: [this.resolveVariable(varIdx, variable.scope, rval.name || '', rval.type, rval.value)]
 				};
 				this.sendResponse(response);
 			});
@@ -272,6 +360,7 @@ export class SQFDebug extends DebugSession {
 			// Requesting variables from a specific stack frame
 			let frame = args.variablesReference - SQFDebug.STACK_VARIABLES_ID;
 			this.log(`Stackframe ${frame} variables requested`);
+			
 			const remoteVariables = this.debugger?.getStackVariables(frame);
 			const variables = new Array<DebugProtocol.Variable>();
 
@@ -279,48 +368,31 @@ export class SQFDebug extends DebugSession {
 				Object.keys(remoteVariables).forEach(name => {
 					const rval = remoteVariables[name];
 					// Lets resolve oop objects
-					if(rval.type === "string" && rval.value.startsWith("o_")) {
-						variables.push({
-							name,
-							value: rval.value,
-							type: "object",
-							variablesReference: 0
-						});
-					} else {
-						variables.push({
-							name,
-							value: rval.type === "string"? rval.value : JSON.stringify(rval.value),
-							type: rval.type,
-							variablesReference: 0
-						});
-					}
+					// Add the variable to our variable index if it isn't there
+					let index = this.indexVariable(name, VariableScope.Stack);
+					variables.push(this.resolveVariable(index, VariableScope.Stack, name, rval.type, rval.value));
 				});
 			}
+
+			variables.sort((l, r) => { return l.name.localeCompare(r.name); });
 
 			response.body = {
 				variables
 			};
 
 			this.sendResponse(response);
-		} else if (args.variablesReference > 1) {
+		} else {
 			// Requesting variable list for a specific scope
 			this.log(`Scope ${args.variablesReference} variable list requested`);
 			// args.variablesReference is a scope
-			this.debugger?.getVariablesInScope(Math.pow(2, args.variablesReference - 1)).then(vars => {
+			this.debugger?.getVariablesInScope(args.variablesReference).then(vars => {
 				const variables = new Array<DebugProtocol.Variable>();
 
 				if (vars) {
 					Object.keys(vars).forEach(scope => {
 						vars[scope].forEach((name:string) => {
 							// Add the variable to our variable index if it isn't there
-							let index = this.variables.findIndex(v => v.name === name && v.scope === parseInt(scope));
-							if (index === -1) {
-								index = this.variables.length;
-								this.variables.push({
-									name, scope: parseInt(scope)
-								});
-							}
-
+							let index = this.indexVariable(name, parseInt(scope));
 							variables.push({
 								name,
 								value: '',
@@ -330,6 +402,8 @@ export class SQFDebug extends DebugSession {
 						});
 					});
 				}
+
+				variables.sort((l, r) => { return l.name.localeCompare(r.name); });
 
 				response.body = {
 					variables

@@ -52,10 +52,10 @@ enum DebuggerState {
 export enum VariableScope {
     Stack = 1,
     Local = 2,
-    MissionNamespace = 3,
-    UiNamespace = 4,
-    ProfileNamespace = 5,
-    ParsingNamespace = 6
+    MissionNamespace = 4,
+    UiNamespace = 8,
+    ProfileNamespace = 16,
+    ParsingNamespace = 32
 };
 
 interface IRemoteMessage {
@@ -103,8 +103,8 @@ export interface ICallStackItem {
 }
 
 export interface IVariable {
-    name: string;
-    value: string;
+    name?: string;
+    value: string | number | IVariable[];
     type: string;
 }
 
@@ -120,6 +120,26 @@ export class ArmaDebug extends EventEmitter {
 
     breakpoints: { [key: number]: IBreakpointRequest } = {};
     breakpointId = 0;
+
+    static OOP_PREFIX = "o_";
+    static MEMBER_SEPARATOR = "_";
+    static OBJECT_SEPARATOR = "_N_";
+    static SPECIAL_SEPARATOR = "_spm_";
+    static STATIC_SEPARATOR = "_stm_";
+    static METHOD_SEPARATOR = "_fnc_";
+    static INNER_PREFIX = "inner_";
+    static GLOBAL_SEPARATOR = "global_";
+
+    // ==== Private special members
+    static NEXT_ID_STR = "nextID";
+    static MEM_LIST_STR = "memList";
+    static STATIC_MEM_LIST_STR = "staticMemList";
+    static SERIAL_MEM_LIST_STR = "serialMemList";
+    static METHOD_LIST_STR = "methodList";
+    static PARENTS_STR = "parents";
+    static OOP_PARENT_STR = "oop_parent";
+    static OOP_PUBLIC_STR = "oop_public";
+    static NAMESPACE_STR = "namespace";
 
     constructor() {
         super();
