@@ -232,14 +232,7 @@ export class SQFDebug extends DebugSession {
 						return this.debugger?.getVariables(VariableScope.MissionNamespace, instanceMembers.concat(staticMembers)).then(memberValues => {
 							return memberValues.map(memberValue => {
 								// Add the variable to our variable index if it isn't there
-								let index = this.variables.findIndex(v => v.name === memberValue.name && v.scope === VariableScope.MissionNamespace);
-								if (index === -1) {
-									index = this.variables.length;
-									this.variables.push({
-										name: memberValue.name || '', 
-										scope: VariableScope.MissionNamespace
-									});
-								};
+								let index = this.indexVariable(memberValue.name || '', VariableScope.MissionNamespace); 
 								return this.resolveVariable(
 									index, 
 									VariableScope.MissionNamespace,
@@ -308,6 +301,13 @@ export class SQFDebug extends DebugSession {
 				name,
 				value: value as string,
 				type: "object",
+				variablesReference: id + SQFDebug.VARIABLE_EXPAND_ID
+			};
+		} else if (type === "array") {
+			return {
+				name,
+				value: `array of ${(value as any[]).length} items`,
+				type: "array",
 				variablesReference: id + SQFDebug.VARIABLE_EXPAND_ID
 			};
 		} else {

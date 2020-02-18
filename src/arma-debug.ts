@@ -59,6 +59,7 @@ export enum VariableScope {
 };
 
 interface IRemoteMessage {
+    handle?: string;
     command: RemoteCommands;
     data: any;
     callstack?: ICallStackItem[];
@@ -78,6 +79,7 @@ interface ICompiledInstruction {
 }
 
 interface IClientMessage {
+    handle: string;
     command: Commands;
     data: any;
 }
@@ -108,6 +110,15 @@ export interface IVariable {
     type: string;
 }
 
+interface IVariableRequest {
+    scope?: VariableScope; 
+    name: string[];
+}
+
+interface IVariableListRequest {
+    scope?: VariableScope;
+}
+
 export class ArmaDebug extends EventEmitter {
     connected: boolean = false;
     initialized: boolean = false;
@@ -120,6 +131,8 @@ export class ArmaDebug extends EventEmitter {
 
     breakpoints: { [key: number]: IBreakpointRequest } = {};
     breakpointId = 0;
+
+    nextRequestId = 0;
 
     static OOP_PREFIX = "o_";
     static MEMBER_SEPARATOR = "_";
@@ -152,7 +165,7 @@ export class ArmaDebug extends EventEmitter {
 
         this.client = net.connect('\\\\.\\pipe\\ArmaDebugEnginePipeIface', () => {
             this.connected = true;
-            this.sendCommand(Commands.Hello);
+            this.sendCommand(this.nextHandle(), Commands.Hello);
         });
 
         this.client.on('data', (data) => {
@@ -168,16 +181,18 @@ export class ArmaDebug extends EventEmitter {
         });
     }
 
+    protected nextHandle():string { return (++this.nextRequestId).toString(); }
+
     addBreakpoint(breakpoint: IBreakpointRequest) {
         this.breakpoints[this.breakpointId++] = breakpoint;
 
-        this.sendCommand(Commands.AddBreakpoint, breakpoint);
+        this.sendCommand(this.nextHandle(), Commands.AddBreakpoint, breakpoint);
 
         return this.breakpointId - 1;
     }
 
     removeBreakpoint(breakpoint: IBreakpointRequest) {
-        this.sendCommand(Commands.RemoveBreakpoint, breakpoint);
+        this.sendCommand(this.nextHandle(), Commands.RemoveBreakpoint, breakpoint);
     }
 
     clearBreakpoints(path: string) {
@@ -193,38 +208,42 @@ export class ArmaDebug extends EventEmitter {
     }
 
     continue(type: ContinueExecutionType = ContinueExecutionType.Continue) {
-        this.sendCommand(Commands.ContinueExecution, type);
+        this.sendCommand(this.nextHandle(), Commands.ContinueExecution, type);
     }
+
 
     getVariable(scope: VariableScope, name: string): Promise<IVariable> {
         return new Promise((resolve, reject) => {
-            let request: { scope?: VariableScope; name: string[]; } = { name: [name] };
-            if (scope) {
-                request.scope = scope;
-            }
-
-            this.once('variable', data => resolve((data as IVariable[])[0]));
-            this.sendCommand(Commands.GetVariable, request);
+            let request:IVariableRequest = { 
+                scope,
+                name: [name]
+            };
+            let handle = this.nextHandle();
+            this.once('variable'+handle, data => resolve((data as IVariable[])[0]));
+            this.sendCommand(handle, Commands.GetVariable, request);
         });
     }
 
     getVariables(scope: VariableScope, names: string[]): Promise<IVariable[]> {
         return new Promise((resolve, reject) => {
-            let request: { scope?: VariableScope; name: string[]; } = { name: names };
-            if (scope) {
-                request.scope = scope;
-            }
-
-            this.once('variable', data => resolve(data as IVariable[]));
-            this.sendCommand(Commands.GetVariable, request);
+            let request:IVariableRequest = { 
+                scope,
+                name: names
+            };
+            let handle = this.nextHandle();
+            this.once('variable'+handle, data => resolve(data as IVariable[]));
+            this.sendCommand(handle, Commands.GetVariable, request);
         });
     }
 
     getVariablesInScope(scope: VariableScope, ): Promise<any> {
         return new Promise((resolve, reject) => {
-            this.once('variables', data => resolve(data));
-
-            this.sendCommand(Commands.GetAvailableVariables, { scope });
+            let request:IVariableListRequest = { 
+                scope
+            };
+            let handle = this.nextHandle();
+            this.once('variables'+handle, data => resolve(data));
+            this.sendCommand(handle, Commands.GetAvailableVariables, request);
         });
     }
 
@@ -277,20 +296,21 @@ export class ArmaDebug extends EventEmitter {
 
             case RemoteCommands.VariableReturn:
 
-                this.emit('variable', message.data);
+                this.emit('variable' + (message.handle || ''), message.data);
 
                 break;
 
             case RemoteCommands.VariablesReturn:
 
-                this.emit('variables', message.data);
+                this.emit('variables' + (message.handle || ''), message.data);
 
                 break;
         }
     }
 
-    private sendCommand(command: Commands, data: any = null) {
+    private sendCommand(handle:string, command: Commands, data: any = null) {
         return this.send({
+            handle,
             command,
             data
         });
