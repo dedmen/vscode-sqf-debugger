@@ -124,7 +124,7 @@ interface IVariableListRequest {
     scope?: VariableScope;
 }
 
-export class ArmaDebug extends EventEmitter {
+export class ArmaDebugEngine extends EventEmitter {
     connected: boolean = false;
     initialized: boolean = false;
 

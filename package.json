@@ -16,8 +16,8 @@
 		"Debuggers"
 	],
 	"private": true,
-	"main": "./out/extension.js",
-	"activationEvents": ["onDebug", "onLanguage:sqf"],
+	"main": "./out/extension",
+	"activationEvents": ["onDebug"],
 	"contributes": {
 		"languages": [
 			{
@@ -66,7 +66,7 @@
 							},
 							"scriptPrefix": {
 								"type": "string",
-								"default": "mpmissions\\__cur_mp.altis",
+								"default": "${workspaceFolder}",
 								"description": "Ingame script prefix"
 							}
 						}
@@ -78,7 +78,7 @@
 						"type": "sqf",
 						"request": "launch",
 						"missionRoot": "${workspaceFolder}",
-						"scriptPrefix": "mpmissions\\__cur_mp.altis"
+						"scriptPrefix": "${workspaceFolder}"
 					}
 				]
 			}
