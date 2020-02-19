@@ -2,6 +2,7 @@
 	"name": "sqf-debugger",
 	"displayName": "sqf-debugger",
 	"description": "",
+	"publisher": "billw",
 	"author": {
 		"name": "billw2012",
 		"email": "billw2011@gmail.com"
@@ -15,17 +16,9 @@
 		"Debuggers"
 	],
 	"private": true,
+	"main": "./out/extension.js",
+	"activationEvents": ["onDebug", "onLanguage:sqf"],
 	"contributes": {
-		"configuration": {
-			"title": "SQF Debugger",
-			"properties": {
-				"sqf-debugger.missionRoot": {
-					"type": "string",
-					"default": "",
-					"description": "Absolute path to the mission root directory"
-				}
-			}
-		},
 		"languages": [
 			{
 				"id": "sqf",

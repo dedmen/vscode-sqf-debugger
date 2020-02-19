@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 
-export var missionRoot: string = '';
-
 export function activate(context: vscode.ExtensionContext) {
 	//missionRoot = vscode.workspace.getConfiguration('sqf-debugger').get<string>('missionRoot') ?? '';
 	//vscode.window.showInformationMessage(`sqf debugger config ${missionRoot}`);

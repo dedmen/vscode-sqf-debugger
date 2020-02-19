@@ -104,9 +104,14 @@ export interface ICallStackItem {
     compiled: ICompiledInstruction[];
 }
 
+export interface IArrayValue {
+    type: string;
+    value: string | number | IArrayValue[];
+}
+
 export interface IVariable {
     name?: string;
-    value: string | number | IVariable[];
+    value: string | number | IArrayValue[];
     type: string;
 }
 
@@ -212,26 +217,26 @@ export class ArmaDebug extends EventEmitter {
     }
 
 
-    getVariable(scope: VariableScope, name: string): Promise<IVariable> {
-        return new Promise((resolve, reject) => {
-            let request:IVariableRequest = { 
-                scope,
-                name: [name]
-            };
-            let handle = this.nextHandle();
-            this.once('variable'+handle, data => resolve((data as IVariable[])[0]));
-            this.sendCommand(handle, Commands.GetVariable, request);
+    getVariable(scope: VariableScope, name: string): Promise<IVariable | null> {
+        return this.getVariables(scope, [name]).then(vars => {
+            if(vars) {
+                return vars[0];
+            }
+            return null;
         });
     }
 
-    getVariables(scope: VariableScope, names: string[]): Promise<IVariable[]> {
+    getVariables(scope: VariableScope, names: string[]): Promise<IVariable[] | null> {
         return new Promise((resolve, reject) => {
             let request:IVariableRequest = { 
                 scope,
                 name: names
             };
             let handle = this.nextHandle();
-            this.once('variable'+handle, data => resolve(data as IVariable[]));
+            this.once('variable'+handle, data => {
+                //this.l(`getVariables ${scope}:${names} returned ${data[0].value}`);
+                return resolve(data as IVariable[]);
+            });
             this.sendCommand(handle, Commands.GetVariable, request);
         });
     }
@@ -248,7 +253,7 @@ export class ArmaDebug extends EventEmitter {
     }
 
     getStackVariables(frame:number) {
-        return this.callStack ? this.callStack[frame].variables : null;
+        return this.callStack && this.callStack.length < frame ? this.callStack[frame].variables : null;
     }
 
     getCallStack() {
