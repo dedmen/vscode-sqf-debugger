@@ -8,7 +8,8 @@ import {
 } from 'vscode-debugadapter';
 
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IArrayValue } from './arma-debug-engine';
+import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IArrayValue, ContinueExecutionType } from './arma-debug-engine';
+import { trueCasePathSync } from 'true-case-path';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	//rptPath?: string
@@ -59,9 +60,11 @@ export class SQFDebugSession extends DebugSession {
 		// The frontend will end the configuration sequence by calling 'configurationDone' request.
 		this.sendEvent(new InitializedEvent());
 		this.log('Initializing sqf debugger');
-		//if(response.body) {
-		//response.body.supportsConfigurationDoneRequest = true;
-		//}
+		if(response.body) {
+			response.body.supportsCancelRequest = false;
+			response.body.supportsDataBreakpoints = false;
+			response.body.supportsEvaluateForHovers = false;
+		}
 		this.connect();
 
 		this.sendResponse(response);
@@ -71,14 +74,30 @@ export class SQFDebugSession extends DebugSession {
 	protected connect() {
 		this.disconnect();
 		this.log('Connecting to sqf debugger');
+
 		this.debugger = new ArmaDebugEngine();
 		this.debugger.connect();
-		this.debugger.on('breakpoint', () => {
+
+		this.debugger.on('halt-breakpoint', () => {
+			this.variables = [];
 			this.sendEvent(new StoppedEvent('breakpoint', SQFDebugSession.THREAD_ID));
+		});
+		this.debugger.on('halt-step', () => {
+			this.variables = [];
+			this.sendEvent(new StoppedEvent('step', SQFDebugSession.THREAD_ID));
+		});
+		this.debugger.on('halt-error', () => {
+			this.variables = [];
+			this.sendEvent(new StoppedEvent('exception', SQFDebugSession.THREAD_ID));
+		});
+		this.debugger.on('halt-assert', () => {
+			this.variables = [];
+			this.sendEvent(new StoppedEvent('assert', SQFDebugSession.THREAD_ID));
 		});
 		this.debugger.on('log', (text) => {
 			this.log(text);
 		});
+
 		this.variables = [];
 	}
 
@@ -88,6 +107,20 @@ export class SQFDebugSession extends DebugSession {
 			this.debugger.end();
 			this.debugger = null;
 		}
+	}
+
+	// Debugger API implementation --------------
+	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
+		this.log(`Launching...`);
+		
+		this.connect();
+
+		this.missionRoot = args.missionRoot?.toLowerCase() || "";
+		this.scriptPrefix = args.scriptPrefix?.toLowerCase() || "";
+
+		this.sendResponse(response);
+
+		this.sendEvent(new InitializedEvent());
 	}
 
 	protected terminateRequest(response: DebugProtocol.TerminateResponse, args: DebugProtocol.TerminateArguments, request?: DebugProtocol.Request): void {
@@ -115,15 +148,30 @@ export class SQFDebugSession extends DebugSession {
 		this.sendResponse(response);
 	}
 
-	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
-		this.log(`Launching...`);
+	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments) {
+		this.continue(response, ContinueExecutionType.Continue);
+	}
 
-		this.missionRoot = args.missionRoot?.toLowerCase() || "";
-		this.scriptPrefix = args.scriptPrefix?.toLowerCase() || "";
+	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request): void {
+		this.continue(response, ContinueExecutionType.StepOver);
+	}
+	
+	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments, request?: DebugProtocol.Request): void {
+		this.continue(response, ContinueExecutionType.StepInto);
+	}
 
+	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments, request?: DebugProtocol.Request): void {
+		this.continue(response, ContinueExecutionType.StepOut);
+	}
+
+	protected continue(response: DebugProtocol.NextResponse, type:ContinueExecutionType) {
+		this.log(`Continue ${type}`);
+		if (!this.debugger?.connected) {
+			this.log("Debugger not connected");
+			return;
+		}
+		this.debugger?.continue(type);
 		this.sendResponse(response);
-
-		this.sendEvent(new InitializedEvent());
 	}
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments) {
@@ -141,11 +189,7 @@ export class SQFDebugSession extends DebugSession {
 			return;
 		}
 
-		let path = args.source.path.toLowerCase();
-		if (path.startsWith(this.missionRoot)) {
-			path = path.substr(this.missionRoot.length);
-		}
-		path = `${this.scriptPrefix}${path}`;
+		let path = this.convertClientPathToDebugger(args.source.path);
 
 		this.log(`Setting breakpoints for ${path}...`);
 
@@ -162,7 +206,7 @@ export class SQFDebugSession extends DebugSession {
 				action: { code: null, basePath: null, type: 2 },
 				condition: null,
 				filename: path,
-				line: breakpoint.line
+				line: this.convertClientLineToDebugger(breakpoint.line)
 			});
 
 			return {
@@ -179,19 +223,30 @@ export class SQFDebugSession extends DebugSession {
 		this.sendResponse(response);
 	}
 
+	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments) {
+		const scopes = new Array<Scope>();
+		scopes.push(new Scope("Stack", SQFDebugSession.STACK_VARIABLES_ID + args.frameId, false));
+		scopes.push(new Scope("Local", VariableScope.Local, true));
+		scopes.push(new Scope("MissionNamespace", VariableScope.MissionNamespace, true));
+		scopes.push(new Scope("UiNamespace", VariableScope.UiNamespace, true));
+		scopes.push(new Scope("ProfileNamespace", VariableScope.ProfileNamespace, true));
+		scopes.push(new Scope("ParsingNamespace", VariableScope.ParsingNamespace, true));
+
+		response.body = {
+			scopes
+		};
+
+		this.sendResponse(response);
+	}
+
 	protected getCallstackFrame(srcFrame: ICallStackItem, idx: number): StackFrame {
 		if(srcFrame.lastInstruction){ 
-			let sourceFile = srcFrame.lastInstruction.filename?.toLowerCase();
-			if (sourceFile?.startsWith(this.scriptPrefix)) {
-				sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
-			}
-			let source = sourceFile? new Source(path.basename(sourceFile), sourceFile) : undefined;
 			return new StackFrame(
 				idx,
-				srcFrame.lastInstruction.name,
-				source,
-				srcFrame.lastInstruction.fileOffset[0],
-				srcFrame.lastInstruction.fileOffset[2]
+				`${srcFrame.lastInstruction.name.replace('\n', ' ')} [${srcFrame.lastInstruction.type}]`,
+				this.createSource(srcFrame.lastInstruction.filename),
+				this.convertDebuggerLineToClient(srcFrame.lastInstruction.fileOffset[0]),
+				this.convertDebuggerColumnToClient(srcFrame.lastInstruction.fileOffset[2])
 			);
 		} else {
 			return new StackFrame(idx, 'unknown');
@@ -217,20 +272,109 @@ export class SQFDebugSession extends DebugSession {
 		this.sendResponse(response);
 	}
 
-	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments) {
-		const scopes = new Array<Scope>();
-		scopes.push(new Scope("Stack", SQFDebugSession.STACK_VARIABLES_ID + args.frameId, false));
-		scopes.push(new Scope("Local", VariableScope.Local, true));
-		scopes.push(new Scope("MissionNamespace", VariableScope.MissionNamespace, true));
-		scopes.push(new Scope("UiNamespace", VariableScope.UiNamespace, true));
-		scopes.push(new Scope("ProfileNamespace", VariableScope.ProfileNamespace, true));
-		scopes.push(new Scope("ParsingNamespace", VariableScope.ParsingNamespace, true));
+	protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments) {
+		if (!this.debugger?.connected) {
+			this.log("Debugger not connected");
+			return null;
+		}
 
-		response.body = {
-			scopes
-		};
+		if (args.variablesReference >= SQFDebugSession.VARIABLE_EXPAND_ID) {
+			// Expanding a variable value by id
+			let varIdx = args.variablesReference - SQFDebugSession.VARIABLE_EXPAND_ID;
+			this.log(`Variable expansion of ${varIdx} requested`);
 
-		this.sendResponse(response);
+			//const variable = this.variables[varIdx];
+			this.expandVariable(varIdx)?.then(vars => {
+				if (vars) {
+					response.body = {
+						variables: vars
+					};
+				}
+				this.sendResponse(response);
+			}) || this.sendResponse(response);
+			// this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
+			// 	return this.expandVariable(varIdx);
+			// }).then(vars => {
+			// 	if(vars) {
+			// 		response.body = {
+			// 			variables: vars
+			// 		};
+			// 	}
+			// 	this.sendResponse(response);
+			// });
+		} else if (args.variablesReference >= SQFDebugSession.VARIABLES_ID) {
+			// Requesting a variable value by id
+			let varIdx = args.variablesReference - SQFDebugSession.VARIABLES_ID;
+			this.log(`Variable ${varIdx} requested`);
+
+			this.getVariableValueFromId(varIdx)?.then(rval => {
+				response.body = {
+					variables: [this.resolveVariable(rval)]
+				};
+				this.sendResponse(response);
+			}) || this.sendResponse(response);
+		} else if (args.variablesReference >= SQFDebugSession.STACK_VARIABLES_ID) {
+			// Requesting variables from a specific stack frame
+			let frame = args.variablesReference - SQFDebugSession.STACK_VARIABLES_ID;
+			this.log(`Stackframe ${frame} variables requested`);
+
+			const remoteVariables = this.debugger?.getStackVariables(frame);
+			const variables = new Array<DebugProtocol.Variable>();
+
+			if (remoteVariables) {
+				Object.keys(remoteVariables).forEach(name => {
+					const rval = remoteVariables[name];
+					// Lets resolve oop objects
+					// Add the variable to our variable index if it isn't there
+					const variable = this.cacheVariable(name, VariableScope.Stack, undefined, rval.type, rval.value);
+					variables.push(this.resolveVariable(variable));
+				});
+			}
+
+			variables.sort((l, r) => { return l.name.localeCompare(r.name); });
+
+			response.body = {
+				variables
+			};
+
+			this.sendResponse(response);
+		} else {
+			// Requesting variable list for a specific scope
+			this.log(`Scope ${args.variablesReference} variable list requested`);
+			// args.variablesReference is a scope
+			this.debugger?.getVariablesInScope(args.variablesReference).then(vars => {
+				this.log(`Scope ${args.variablesReference} variable list received: ${JSON.stringify(vars)}`);
+				const variables = new Array<DebugProtocol.Variable>();
+
+				if (vars) {
+					Object.keys(vars).forEach(scope => {
+						vars[scope]?.forEach((name: string) => {
+							// Add the variable to our variable index if it isn't there
+							const variable = this.cacheVariable(name, parseInt(scope));
+							variables.push({
+								name,
+								value: '',
+								type: undefined,
+								variablesReference: SQFDebugSession.VARIABLES_ID + variable.id
+							});
+						});
+					});
+				}
+
+				variables.sort((l, r) => { return l.name.localeCompare(r.name); });
+
+				response.body = {
+					variables
+				};
+
+				this.sendResponse(response);
+			}) || this.sendResponse(response);
+		}
+	}
+
+	// Implementation details --------------
+	protected log(msg: string) {
+		this.sendEvent(new OutputEvent(`${msg}\n`));
 	}
 
 	protected cacheVariable(name: string, scope: VariableScope, parent?: string, type?: string, value?: string | number | IArrayValue[]): ICachedVariable {
@@ -430,121 +574,27 @@ export class SQFDebugSession extends DebugSession {
 		});
 	}
 
-	protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments) {
-		if (!this.debugger?.connected) {
-			this.log("Debugger not connected");
-			return null;
+	protected convertClientPathToDebugger(clientPath: string): string
+	{
+		let path = clientPath.toLowerCase();
+		if (path.startsWith(this.missionRoot)) {
+			path = path.substr(this.missionRoot.length);
 		}
-
-		if (args.variablesReference >= SQFDebugSession.VARIABLE_EXPAND_ID) {
-			// Expanding a variable value by id
-			let varIdx = args.variablesReference - SQFDebugSession.VARIABLE_EXPAND_ID;
-			this.log(`Variable expansion of ${varIdx} requested`);
-
-			//const variable = this.variables[varIdx];
-			this.expandVariable(varIdx)?.then(vars => {
-				if (vars) {
-					response.body = {
-						variables: vars
-					};
-				}
-				this.sendResponse(response);
-			}) || this.sendResponse(response);
-			// this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
-			// 	return this.expandVariable(varIdx);
-			// }).then(vars => {
-			// 	if(vars) {
-			// 		response.body = {
-			// 			variables: vars
-			// 		};
-			// 	}
-			// 	this.sendResponse(response);
-			// });
-		} else if (args.variablesReference >= SQFDebugSession.VARIABLES_ID) {
-			// Requesting a variable value by id
-			let varIdx = args.variablesReference - SQFDebugSession.VARIABLES_ID;
-			this.log(`Variable ${varIdx} requested`);
-
-			this.getVariableValueFromId(varIdx)?.then(rval => {
-				response.body = {
-					variables: [this.resolveVariable(rval)]
-				};
-				this.sendResponse(response);
-			}) || this.sendResponse(response);
-		} else if (args.variablesReference >= SQFDebugSession.STACK_VARIABLES_ID) {
-			// Requesting variables from a specific stack frame
-			let frame = args.variablesReference - SQFDebugSession.STACK_VARIABLES_ID;
-			this.log(`Stackframe ${frame} variables requested`);
-
-			const remoteVariables = this.debugger?.getStackVariables(frame);
-			const variables = new Array<DebugProtocol.Variable>();
-
-			if (remoteVariables) {
-				Object.keys(remoteVariables).forEach(name => {
-					const rval = remoteVariables[name];
-					// Lets resolve oop objects
-					// Add the variable to our variable index if it isn't there
-					const variable = this.cacheVariable(name, VariableScope.Stack, undefined, rval.type, rval.value);
-					variables.push(this.resolveVariable(variable));
-				});
-			}
-
-			variables.sort((l, r) => { return l.name.localeCompare(r.name); });
-
-			response.body = {
-				variables
-			};
-
-			this.sendResponse(response);
-		} else {
-			// Requesting variable list for a specific scope
-			this.log(`Scope ${args.variablesReference} variable list requested`);
-			// args.variablesReference is a scope
-			this.debugger?.getVariablesInScope(args.variablesReference).then(vars => {
-				this.log(`Scope ${args.variablesReference} variable list received: ${JSON.stringify(vars)}`);
-				const variables = new Array<DebugProtocol.Variable>();
-
-				if (vars) {
-					Object.keys(vars).forEach(scope => {
-						vars[scope]?.forEach((name: string) => {
-							// Add the variable to our variable index if it isn't there
-							const variable = this.cacheVariable(name, parseInt(scope));
-							variables.push({
-								name,
-								value: '',
-								type: undefined,
-								variablesReference: SQFDebugSession.VARIABLES_ID + variable.id
-							});
-						});
-					});
-				}
-
-				variables.sort((l, r) => { return l.name.localeCompare(r.name); });
-
-				response.body = {
-					variables
-				};
-
-				this.sendResponse(response);
-			}) || this.sendResponse(response);
-		}
+		return `${this.scriptPrefix}${path}`;
 	}
 
-	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments) {
-		this.log(`Continue execution requested`);
-		if (!this.debugger?.connected) {
-			this.log("Debugger not connected");
-			return;
+	protected convertDebuggerPathToClient(debuggerPath: string): string
+	{
+		let sourceFile = debuggerPath.toLowerCase();
+		if (sourceFile.startsWith(this.scriptPrefix)) {
+			sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
 		}
-		this.debugger?.continue();
-		this.sendResponse(response);
-		this.variables = [];
+		return trueCasePathSync(sourceFile);
 	}
 
-	protected log(msg: string) {
-		this.sendEvent(new OutputEvent(`${msg}\n`));
+	private createSource(filePath?: string): Source {
+		return new Source(filePath? path.basename(filePath) : 'unknown', filePath? this.convertDebuggerPathToClient(filePath) : undefined, undefined, undefined, 'sqf-debugger-data');
 	}
-
 }
 
 DebugSession.run(SQFDebugSession);

@@ -21,7 +21,7 @@ enum Commands {
     GetAvailableVariables = 10
 }
 
-enum ContinueExecutionType {
+export enum ContinueExecutionType {
     Continue = 0,
     StepInto = 1,
     StepOver = 2,
@@ -184,12 +184,12 @@ export class ArmaDebugEngine extends EventEmitter {
             this.initialized = false;
             this.client = null;
 
-            setTimeout(() => this.connect(), 1000);
+            //setTimeout(() => this.connect(), 1000);
         });
     }
 
     end() {
-        this.client?.end();
+        this.client?.destroy();
     }
 
     protected nextHandle():string { return (++this.nextRequestId).toString(); }
@@ -270,6 +270,25 @@ export class ArmaDebugEngine extends EventEmitter {
         this.emit('log', message);
     }
 
+    private emitStep(type:string, message:IRemoteMessage) {
+        this.callStack = message.callstack;
+
+        if (this.callStack) {
+            this.callStack.forEach(c => {
+                if (c.compiled && c.compiled.length > 0) {
+                    c.fileOffset = c.compiled[0].fileOffset;
+                }
+            });
+        }
+
+        if (message.instruction && this.callStack && !this.callStack[this.callStack.length - 1].fileOffset) {
+            this.callStack[this.callStack.length - 1].fileOffset = message.instruction.fileOffset;
+            this.callStack[this.callStack.length - 1].fileName = message.instruction.filename;
+        }
+
+        this.emit(type, message.callstack);
+    }
+
     private receiveMessage(message: IRemoteMessage) {
         this.l("Received:");
         this.l(JSON.stringify(message));
@@ -283,38 +302,33 @@ export class ArmaDebugEngine extends EventEmitter {
                 this.messageQueue = [];
 
                 break;
+            
+            case RemoteCommands.HaltStep:
+                this.emitStep('halt-step', message);
+                break;
 
             case RemoteCommands.HaltBreakpoint:
+                this.emitStep('halt-breakpoint', message);
+                break;
 
-                this.callStack = message.callstack;
+            case RemoteCommands.HaltError:
+                this.emitStep('halt-error', message);
+                break;
 
-                if (this.callStack) {
-                    this.callStack.forEach(c => {
-                        if (c.compiled && c.compiled.length > 0) {
-                            c.fileOffset = c.compiled[0].fileOffset;
-                        }
-                    });
-                }
+            case RemoteCommands.HaltScriptAssert:
+                this.emitStep('halt-assert', message);
+                break;
 
-                if (message.instruction && this.callStack && !this.callStack[this.callStack.length - 1].fileOffset) {
-                    this.callStack[this.callStack.length - 1].fileOffset = message.instruction.fileOffset;
-                    this.callStack[this.callStack.length - 1].fileName = message.instruction.filename;
-                }
-
-                this.emit('breakpoint', message.callstack);
-
+            case RemoteCommands.HaltScriptHalt:
+                this.emitStep('halt-halt', message);
                 break;
 
             case RemoteCommands.VariableReturn:
-
                 this.emit('variable' + (message.handle || ''), message.data);
-
                 break;
 
             case RemoteCommands.VariablesReturn:
-
                 this.emit('variables' + (message.handle || ''), message.data);
-
                 break;
         }
     }
