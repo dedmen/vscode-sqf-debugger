@@ -174,7 +174,9 @@ export class ArmaDebugEngine extends EventEmitter {
         });
 
         this.client.on('data', (data) => {
-            this.receiveMessage(JSON.parse(data.toString()) as IRemoteMessage);
+            data.toString().split('\n').filter(str => str).forEach(str => {
+                this.receiveMessage(JSON.parse(str) as IRemoteMessage);
+            });
         });
 
         this.client.on('close', () => {
@@ -184,6 +186,10 @@ export class ArmaDebugEngine extends EventEmitter {
 
             setTimeout(() => this.connect(), 1000);
         });
+    }
+
+    end() {
+        this.client?.end();
     }
 
     protected nextHandle():string { return (++this.nextRequestId).toString(); }
@@ -253,7 +259,7 @@ export class ArmaDebugEngine extends EventEmitter {
     }
 
     getStackVariables(frame:number) {
-        return this.callStack && this.callStack.length < frame ? this.callStack[frame].variables : null;
+        return (this.callStack && this.callStack.length > frame) ? this.callStack[frame].variables : null;
     }
 
     getCallStack() {

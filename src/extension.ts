@@ -9,7 +9,7 @@ import { SQFDebugSession } from './sqf-debug';
  * The compile time flag 'runMode' controls how the debug adapter is run.
  * 'server' is required for debugging the adapter
  */
-const runMode: 'server' | 'inline' = 'server';
+const runMode: 'server' | 'inline' = 'inline';
 
 export function activate(context: vscode.ExtensionContext) {
 	//missionRoot = vscode.workspace.getConfiguration('sqf-debugger').get<string>('missionRoot') ?? '';

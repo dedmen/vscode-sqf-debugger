@@ -62,7 +62,15 @@ export class SQFDebugSession extends DebugSession {
 		//if(response.body) {
 		//response.body.supportsConfigurationDoneRequest = true;
 		//}
+		this.connect();
 
+		this.sendResponse(response);
+		//let config = vscode.workspace.getConfiguration('sqf-debugger');
+	}
+
+	protected connect() {
+		this.disconnect();
+		this.log('Connecting to sqf debugger');
 		this.debugger = new ArmaDebugEngine();
 		this.debugger.connect();
 		this.debugger.on('breakpoint', () => {
@@ -71,12 +79,31 @@ export class SQFDebugSession extends DebugSession {
 		this.debugger.on('log', (text) => {
 			this.log(text);
 		});
-
-		this.sendResponse(response);
-
 		this.variables = [];
+	}
 
-		//let config = vscode.workspace.getConfiguration('sqf-debugger');
+	protected disconnect() {
+		if(this.debugger) {
+			this.log('Disconnecting from sqf debugger');
+			this.debugger.end();
+			this.debugger = null;
+		}
+	}
+
+	protected terminateRequest(response: DebugProtocol.TerminateResponse, args: DebugProtocol.TerminateArguments, request?: DebugProtocol.Request): void {
+		this.disconnect();
+		this.sendResponse(response);
+	}
+
+	protected restartRequest(response: DebugProtocol.RestartResponse, args: DebugProtocol.RestartArguments, request?: DebugProtocol.Request): void {
+		this.disconnect();
+		this.connect();
+		this.sendResponse(response);
+	}
+
+	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
+		this.disconnect();
+		this.sendResponse(response);
 	}
 
 	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
@@ -153,19 +180,22 @@ export class SQFDebugSession extends DebugSession {
 	}
 
 	protected getCallstackFrame(srcFrame: ICallStackItem, idx: number): StackFrame {
-
-		var sourceFile = srcFrame.lastInstruction.filename.toLowerCase();
-		if (sourceFile.startsWith(this.scriptPrefix)) {
-			sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
+		if(srcFrame.lastInstruction){ 
+			let sourceFile = srcFrame.lastInstruction.filename?.toLowerCase();
+			if (sourceFile?.startsWith(this.scriptPrefix)) {
+				sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
+			}
+			let source = sourceFile? new Source(path.basename(sourceFile), sourceFile) : undefined;
+			return new StackFrame(
+				idx,
+				srcFrame.lastInstruction.name,
+				source,
+				srcFrame.lastInstruction.fileOffset[0],
+				srcFrame.lastInstruction.fileOffset[2]
+			);
+		} else {
+			return new StackFrame(idx, 'unknown');
 		}
-		var source = new Source(path.basename(sourceFile), sourceFile);
-		return new StackFrame(
-			idx,
-			srcFrame.lastInstruction.name,
-			source,
-			srcFrame.lastInstruction.fileOffset[0],
-			srcFrame.lastInstruction.fileOffset[2]
-		);
 	}
 
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
@@ -234,7 +264,7 @@ export class SQFDebugSession extends DebugSession {
 					variable.value = v.value;
 				}
 			});
-			return names.map(name => this.cacheVariable(name, scope, parent)).filter(v => v.type && v.value);
+			return names.map(name => this.cacheVariable(name, scope, parent)).filter(v => v.type !== undefined);
 		}) || null;
 	}
 
@@ -261,6 +291,29 @@ export class SQFDebugSession extends DebugSession {
 		return name.substr(parent?.length || 0);
 	}
 
+	protected mapArrayValues(value:any, type?:string) : any {
+		if(type === 'array') {
+			return (value as IArrayValue[] || []).map(v => this.mapArrayValues(v.value, v.type));
+		}
+		return value;
+	}
+
+	protected valueToString(value:any, type?:string) : string {
+		if(type === 'array') {
+			return !value? '[]' : JSON.stringify(this.mapArrayValues(value, type));
+		}
+		if(value === undefined) {
+			return '<undefined>';
+		}
+		if(value === null) {
+			return '<null>';
+		}
+		// if(type === "string") {
+		// 	return value as string;
+		// }
+		return JSON.stringify(value);
+	}
+
 	protected resolveVariable(variable: ICachedVariable): DebugProtocol.Variable {
 		const name = this.getVariableUIName(variable.name, variable.parent);
 		// Add the variable to our variable index if it isn't there
@@ -274,14 +327,15 @@ export class SQFDebugSession extends DebugSession {
 		} else if (variable.type === "array") {
 			return {
 				name,
-				value: variable.value ? JSON.stringify((variable.value as IArrayValue[]).map(v => v.value)) : 'empty',//`array of ${(value as any[]).length} items`,
+				value: this.valueToString(variable.value, variable.type),
+				//variable.value !== undefined ? JSON.stringify((variable.value as IArrayValue[] || []).map(v => v.value)) : 'empty',//`array of ${(value as any[]).length} items`,
 				type: "array",
-				variablesReference: variable.value ? variable.id + SQFDebugSession.VARIABLE_EXPAND_ID : 0
+				variablesReference: (variable.value !== undefined) ? variable.id + SQFDebugSession.VARIABLE_EXPAND_ID : 0
 			};
 		} else {
 			return {
 				name,
-				value: !variable.value ? '<null>' : (variable.type === "string" ? variable.value as string : JSON.stringify(variable.value)),
+				value: this.valueToString(variable.value, variable.type),
 				type: variable.type || '',
 				variablesReference: 0
 			};
@@ -300,7 +354,7 @@ export class SQFDebugSession extends DebugSession {
 				ArmaDebugEngine.OOP_PREFIX + className.value + ArmaDebugEngine.SPECIAL_SEPARATOR + ArmaDebugEngine.MEM_LIST_STR,
 				ArmaDebugEngine.OOP_PREFIX + className.value + ArmaDebugEngine.SPECIAL_SEPARATOR + ArmaDebugEngine.STATIC_MEM_LIST_STR
 			], VariableScope.MissionNamespace, objectName)?.then(members => {
-
+				//const instanceData = members[0]; //, staticData] = members;
 				// get object and class values for the members
 				//this.log(`Resolved members ${JSON.stringify(members)} for object ${objectName}`);
 				let instanceMembers = (members[0].value as IVariable[]).map(m => {
@@ -348,7 +402,7 @@ export class SQFDebugSession extends DebugSession {
 				// get object class name
 				return this.expandObject(objectName);
 			} else if (variable.type === "array") {
-				return Promise.resolve((variable.value as IArrayValue[]).map(
+				return Promise.resolve((variable.value as IArrayValue[])?.map(
 					(val, idx) => {
 						const name = `${variable.name}[${idx}]`;
 						let partId = 0;
@@ -359,7 +413,7 @@ export class SQFDebugSession extends DebugSession {
 						}
 						return {
 							name: this.getVariableUIName(name, variable.name),
-							value: val.value || 'empty',
+							value: this.valueToString(val.value, val.type),
 							type: val.type,
 							variablesReference: partId
 						} as DebugProtocol.Variable;
@@ -368,7 +422,7 @@ export class SQFDebugSession extends DebugSession {
 			} else {
 				return Promise.resolve([{
 					name: variable.name,
-					value: variable.value,
+					value: this.valueToString(variable.value, variable.type),
 					type: variable.type,
 					variablesReference: 0
 				} as DebugProtocol.Variable]);
@@ -452,7 +506,7 @@ export class SQFDebugSession extends DebugSession {
 
 				if (vars) {
 					Object.keys(vars).forEach(scope => {
-						vars[scope].forEach((name: string) => {
+						vars[scope]?.forEach((name: string) => {
 							// Add the variable to our variable index if it isn't there
 							const variable = this.cacheVariable(name, parseInt(scope));
 							variables.push({
