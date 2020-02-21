@@ -1,9 +1,47 @@
 import * as net from 'net';
 import { EventEmitter } from 'events';
 
+
+export enum BreakpointAction
+{
+    ExecCode = 1,
+    Halt = 2,
+    LogCallstack = 3
+};
+
+export enum BreakpointCondition
+{
+    Code = 1,
+    HitCount = 2
+};
+
+export interface IBreakpointActionExecCode {
+    type: BreakpointAction.ExecCode;
+    code: string;
+};
+
+export interface IBreakpointActionHalt {
+    type: BreakpointAction.Halt;
+};
+
+export interface IBreakpointActionLogCallstack {
+    type: BreakpointAction.LogCallstack;
+    basePath: 'send' | string;
+};
+
+export interface IBreakpointConditionCode {
+    type: BreakpointCondition.Code;
+    code: string;
+};
+
+export interface IBreakpointConditionHitCount {
+    type: BreakpointCondition.HitCount;
+    count: number;
+};
+
 export interface IBreakpointRequest {
-    action: { code: string | null, basePath: string | null, type: number };
-    condition: string | null;
+    action: IBreakpointActionExecCode | IBreakpointActionHalt | IBreakpointActionLogCallstack;
+    condition: IBreakpointConditionCode | IBreakpointConditionHitCount | null;
     filename: string | null;
     line: number;
 }
@@ -84,6 +122,12 @@ interface IClientMessage {
     data: any;
 }
 
+
+export interface IValue {
+    type: 'string' | 'nil' | 'float' | 'array';
+    value: string | number | IValue[];
+}
+
 export interface ICallStackItem {
     contentSample: string;
     fileName?: string;
@@ -91,10 +135,7 @@ export interface ICallStackItem {
     lastInstruction: ICompiledInstruction,
     type: string;
     variables: {
-        [key: string]: {
-            type: 'string' | 'nil' | 'float' | 'array';
-            value: string;
-        }
+        [key: string]: IValue
     };
     fileOffset?: {
         0: number;
@@ -104,15 +145,8 @@ export interface ICallStackItem {
     compiled: ICompiledInstruction[];
 }
 
-export interface IArrayValue {
-    type: string;
-    value: string | number | IArrayValue[];
-}
-
-export interface IVariable {
+export interface IVariable extends IValue {
     name?: string;
-    value: string | number | IArrayValue[];
-    type: string;
 }
 
 interface IVariableRequest {
@@ -259,7 +293,11 @@ export class ArmaDebugEngine extends EventEmitter {
     }
 
     getStackVariables(frame:number) {
-        return (this.callStack && this.callStack.length > frame) ? this.callStack[frame].variables : null;
+        return (this.callStack && this.callStack.length > frame) ? 
+            this.callStack.slice(0, frame+1).map(c => c.variables).reduceRight((prev, curr) => Object.assign(prev, curr), {})
+            //this.callStack[frame].variables
+            :
+            null;
     }
 
     getCallStack() {
@@ -290,8 +328,8 @@ export class ArmaDebugEngine extends EventEmitter {
     }
 
     private receiveMessage(message: IRemoteMessage) {
-        this.l("Received:");
-        this.l(JSON.stringify(message));
+        //this.l("Received:");
+        //this.l(JSON.stringify(message));
 
         switch (message.command) {
             case RemoteCommands.VersionInfo:
@@ -347,8 +385,8 @@ export class ArmaDebugEngine extends EventEmitter {
             return;
         }
 
-        this.l("Send:");
-        this.l(JSON.stringify(data));
+        //this.l("Send:");
+        //this.l(JSON.stringify(data));
         if (this.client) {
             this.client.write(JSON.stringify(data) + '\n');
         };

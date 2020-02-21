@@ -11,6 +11,7 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
+				"C:\\Users\\billw\\Documents\\Arma 3\\mpmissions\\Vindicta\\vscode.code-workspace",
 				"--extensionDevelopmentPath=${workspaceFolder}"
 			],
 			"outFiles": [

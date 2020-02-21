@@ -8,7 +8,7 @@ import {
 } from 'vscode-debugadapter';
 
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IArrayValue, ContinueExecutionType } from './arma-debug-engine';
+import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition } from './arma-debug-engine';
 import { trueCasePathSync } from 'true-case-path';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -22,7 +22,7 @@ interface ICachedVariable {
 	parent?: string;
 	scope: VariableScope;
 	type?: string;
-	value?: string | number | IArrayValue[];
+	value?: string | number | IValue[];
 	id: number;
 }
 
@@ -202,9 +202,26 @@ export class SQFDebugSession extends DebugSession {
 		// Build new breakpoints
 		let breakpoints: DebugProtocol.Breakpoint[] = args.breakpoints.map(breakpoint => {
 			this.log(`Adding breakpoint at ${path}:${breakpoint.line}`);
+
+			let action:IBreakpointActionExecCode | IBreakpointActionHalt | IBreakpointActionLogCallstack;
+			if(breakpoint.logMessage?.toLowerCase() === 'callstack') {
+				action = { type: BreakpointAction.LogCallstack } as IBreakpointActionLogCallstack;
+			} else if(breakpoint.logMessage) {
+				action = { type: BreakpointAction.ExecCode, code: `echo str(${breakpoint.logMessage})` } as IBreakpointActionExecCode;
+			} else {
+				action = { type: BreakpointAction.Halt };
+			}
+
+			let condition:IBreakpointConditionCode | IBreakpointConditionHitCount | null = null;
+			if(breakpoint.condition) {
+				condition = { type: BreakpointCondition.Code, code: breakpoint.condition } as IBreakpointConditionCode;
+			} else if(breakpoint.hitCondition) {
+				condition = { type: BreakpointCondition.HitCount, count: +breakpoint.hitCondition } as IBreakpointConditionHitCount;
+			}
+
 			let id = this.debugger?.addBreakpoint({
-				action: { code: null, basePath: null, type: 2 },
-				condition: null,
+				action,
+				condition,
 				filename: path,
 				line: this.convertClientLineToDebugger(breakpoint.line)
 			});
@@ -262,7 +279,7 @@ export class SQFDebugSession extends DebugSession {
 		const stk = this.debugger?.getCallStack();
 
 		if (stk) {
-			this.log(`Stack trace requested from ${JSON.stringify(stk)}`);
+			this.log(`Stack trace requested`);
 
 			response.body = {
 				stackFrames: stk.map((f, i) => { return this.getCallstackFrame(f, i); }).reverse(),
@@ -283,7 +300,6 @@ export class SQFDebugSession extends DebugSession {
 			let varIdx = args.variablesReference - SQFDebugSession.VARIABLE_EXPAND_ID;
 			this.log(`Variable expansion of ${varIdx} requested`);
 
-			//const variable = this.variables[varIdx];
 			this.expandVariable(varIdx)?.then(vars => {
 				if (vars) {
 					response.body = {
@@ -292,16 +308,6 @@ export class SQFDebugSession extends DebugSession {
 				}
 				this.sendResponse(response);
 			}) || this.sendResponse(response);
-			// this.debugger?.getVariable(variable.scope, variable.name).then(rval => {
-			// 	return this.expandVariable(varIdx);
-			// }).then(vars => {
-			// 	if(vars) {
-			// 		response.body = {
-			// 			variables: vars
-			// 		};
-			// 	}
-			// 	this.sendResponse(response);
-			// });
 		} else if (args.variablesReference >= SQFDebugSession.VARIABLES_ID) {
 			// Requesting a variable value by id
 			let varIdx = args.variablesReference - SQFDebugSession.VARIABLES_ID;
@@ -377,11 +383,11 @@ export class SQFDebugSession extends DebugSession {
 		this.sendEvent(new OutputEvent(`${msg}\n`));
 	}
 
-	protected cacheVariable(name: string, scope: VariableScope, parent?: string, type?: string, value?: string | number | IArrayValue[]): ICachedVariable {
-		let index = this.variables.findIndex(v => v.name === name.toLowerCase() && v.scope === scope && v.parent === parent);
+	protected cacheVariable(name: string, scope: VariableScope, parent?: string, type?: string, value?: string | number | IValue[]): ICachedVariable {
+		let index = this.variables.findIndex(v => v.name === name && v.scope === scope && v.parent === parent);
 		if (index < 0) {
 			index = this.variables.length;
-			this.variables.push({ name: name.toLowerCase(), parent: parent, scope, id: index, type, value });
+			this.variables.push({ name: name, parent: parent, scope, id: index, type, value });
 		}
 		return this.variables[index];
 	}
@@ -437,7 +443,7 @@ export class SQFDebugSession extends DebugSession {
 
 	protected mapArrayValues(value:any, type?:string) : any {
 		if(type === 'array') {
-			return (value as IArrayValue[] || []).map(v => this.mapArrayValues(v.value, v.type));
+			return (value as IValue[] || []).map(v => this.mapArrayValues(v.value, v.type));
 		}
 		return value;
 	}
@@ -534,7 +540,7 @@ export class SQFDebugSession extends DebugSession {
 		});
 	}
 
-	protected isObject(type?: string, value?: string | number | IArrayValue[]): boolean {
+	protected isObject(type?: string, value?: string | number | IValue[]): boolean {
 		return type === "string" && (value as string).startsWith(ArmaDebugEngine.OOP_PREFIX);
 	}
 
@@ -546,7 +552,7 @@ export class SQFDebugSession extends DebugSession {
 				// get object class name
 				return this.expandObject(objectName);
 			} else if (variable.type === "array") {
-				return Promise.resolve((variable.value as IArrayValue[])?.map(
+				return Promise.resolve((variable.value as IValue[])?.map(
 					(val, idx) => {
 						const name = `${variable.name}[${idx}]`;
 						let partId = 0;
@@ -592,8 +598,8 @@ export class SQFDebugSession extends DebugSession {
 		return trueCasePathSync(sourceFile);
 	}
 
-	private createSource(filePath?: string): Source {
-		return new Source(filePath? path.basename(filePath) : 'unknown', filePath? this.convertDebuggerPathToClient(filePath) : undefined, undefined, undefined, 'sqf-debugger-data');
+	private createSource(filePath?: string): Source | undefined {
+		return filePath? new Source(path.basename(filePath), this.convertDebuggerPathToClient(filePath), undefined, undefined, 'sqf-debugger-data') : undefined;
 	}
 }
 
