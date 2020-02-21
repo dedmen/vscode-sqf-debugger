@@ -1,8 +1,11 @@
 {
 	"name": "sqf-debugger",
 	"displayName": "sqf-debugger",
-	"description": "",
-	"publisher": "billw",
+	"description": "Arma 3 SQF Debugger. Requres Arma Debug Engine (https://steamcommunity.com/sharedfiles/filedetails/?id=1585582292).",
+	"publisher": "billw2011",
+	"repository": {
+		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger"
+	},
 	"author": {
 		"name": "billw2012",
 		"email": "billw2011@gmail.com"
