@@ -65,18 +65,33 @@ export class SQFDebugSession extends DebugSession {
 			response.body.supportsDataBreakpoints = false;
 			response.body.supportsEvaluateForHovers = false;
 		}
-		this.connect();
 
-		this.sendResponse(response);
+		this.connect().then(() => 
+			this.sendResponse(response)
+		);
 		//let config = vscode.workspace.getConfiguration('sqf-debugger');
 	}
 
-	protected connect() {
-		this.disconnect();
+	protected connect() : Promise<boolean> {
+		if(this.debugger?.connected) {
+			return Promise.resolve(true);
+		}
+
 		this.log('Connecting to sqf debugger');
+
+		this.variables = [];
 
 		this.debugger = new ArmaDebugEngine();
 		this.debugger.connect();
+
+		let connected = new Promise<boolean>( resolve =>
+			this.debugger?.on('connected', () => {
+				this.variables = [];
+				this.sendEvent(new OutputEvent('connected'));
+				this.log('Connected to sqf debugger');
+				resolve(true);
+			})
+		);
 
 		this.debugger.on('halt-breakpoint', () => {
 			this.variables = [];
@@ -98,7 +113,7 @@ export class SQFDebugSession extends DebugSession {
 			this.log(text);
 		});
 
-		this.variables = [];
+		return connected;
 	}
 
 	protected disconnect() {
@@ -112,8 +127,6 @@ export class SQFDebugSession extends DebugSession {
 	// Debugger API implementation --------------
 	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
 		this.log(`Launching...`);
-		
-		this.connect();
 
 		this.missionRoot = args.missionRoot?.toLowerCase() || "";
 		this.scriptPrefix = args.scriptPrefix?.toLowerCase() || "";

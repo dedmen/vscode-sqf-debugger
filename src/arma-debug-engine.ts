@@ -217,6 +217,17 @@ export class ArmaDebugEngine extends EventEmitter {
             this.connected = false;
             this.initialized = false;
             this.client = null;
+            //setTimeout(() => this.connect(), 1000);
+        });
+        
+        this.client.on('error', (err) => {
+            if(err.name === 'ENOENT') {
+                this.l(`Server not available, did you load ADE correctly?`);
+            } else {
+                this.l(`Socket error: ${JSON.stringify(err)}`);
+            };
+            this.connected = false;
+            this.client = null;
 
             //setTimeout(() => this.connect(), 1000);
         });
@@ -335,7 +346,7 @@ export class ArmaDebugEngine extends EventEmitter {
             case RemoteCommands.VersionInfo:
 
                 this.initialized = true;
-
+                this.emit('connected', message);
                 this.messageQueue.forEach(msg => this.send(msg));
                 this.messageQueue = [];
 

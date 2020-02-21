@@ -10,16 +10,20 @@
 			"isBackground": true,
 			"presentation": {
 				"reveal": "never"
-			},
-			"group": {
-				"kind": "build",
-				"isDefault": true
 			}
 		},
 		{
 			"type": "npm",
 			"script": "vscode:prepublish",
 			"problemMatcher": []
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		}
 	]
 }

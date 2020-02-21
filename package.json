@@ -1,6 +1,6 @@
 {
 	"name": "sqf-debugger",
-	"displayName": "sqf-debugger",
+	"displayName": "SQF Debugger",
 	"description": "Arma 3 SQF Debugger. Requres Arma Debug Engine (https://steamcommunity.com/sharedfiles/filedetails/?id=1585582292).",
 	"publisher": "billw2011",
 	"repository": {
