@@ -116,6 +116,8 @@ class SQFConfigurationProvider implements vscode.DebugConfigurationProvider {
 				config.name = 'connect';
 				config.request = 'launch';
 				config.program = '${file}';
+				config.missionRoot = '${workspaceFolder}';
+				config.scriptPrefix = '${workspaceFolder}';
 				config.stopOnEntry = true;
 			}
 		}

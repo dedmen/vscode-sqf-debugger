@@ -47,16 +47,18 @@ export interface IBreakpointRequest {
 }
 
 enum Commands {
-    Hello = 1,
-    AddBreakpoint = 2,
-    RemoveBreakpoint = 3,
-    ContinueExecution = 4,
+    getVersionInfo = 1,
+    addBreakpoint = 2,
+    delBreakpoint = 3,
+    BPContinue = 4,
     MonitorDump = 5,
     SetHookEnable = 6,
-    GetVariable = 7,
-    GetCurrentCode = 8,
-    GetAllScriptCommands = 9,
-    GetAvailableVariables = 10
+    getVariable = 7,
+    getCurrentCode = 8,
+    getAllScriptCommands = 9,
+    getAvailableVariables = 10,
+    haltNow, // Triggers halt on next possible instruction
+    ExecuteCode // Executes code while halted, in current context and returns result
 }
 
 export enum ContinueExecutionType {
@@ -68,16 +70,19 @@ export enum ContinueExecutionType {
 
 enum RemoteCommands {
     Invalid = 0,
-    VersionInfo = 1,
-    HaltBreakpoint = 2,
-    HaltStep = 3,
-    HaltError = 4,
-    HaltScriptAssert = 5,
-    HaltScriptHalt = 6,
-    HaltPlaceholder = 7,
+    versionInfo = 1,
+    halt_breakpoint = 2,
+    halt_step = 3,
+    halt_error = 4,
+    halt_scriptAsserts = 5,
+    halt_scriptHalt = 6,
+    halt_placeholder = 7,
     ContinueExecution = 8,
     VariableReturn = 9,
-    VariablesReturn = 10
+    VariablesReturn = 10,
+    BreakpointLog = 11, // A log breakpoint was triggered
+    LogMessage = 12, // A log message from the game, for example from echo script command
+    ExecuteCodeResult = 13 // Result of ExecuteCode command
 }
 
 enum DebuggerState {
@@ -107,6 +112,11 @@ interface IRemoteMessage {
     version?: string;
     arch?: string;
     state?: DebuggerState;
+    error?: string;
+
+    code?: string;
+    fileName?: string;
+    exception?: string;
 }
 
 interface ICompiledInstruction {
@@ -158,6 +168,19 @@ interface IVariableListRequest {
     scope?: VariableScope;
 }
 
+interface IExecuteRequest {
+    script: string;
+}
+
+interface ICodeRequest {
+    file: string;
+}
+
+export interface ISourceCode {
+    code: string;
+    fileName: string;
+}
+
 export class ArmaDebugEngine extends EventEmitter {
     connected: boolean = false;
     initialized: boolean = false;
@@ -167,6 +190,9 @@ export class ArmaDebugEngine extends EventEmitter {
     client: net.Socket | null = null;
 
     callStack?: ICallStackItem[];
+
+    logging:boolean = false;
+    verbose:boolean = false;
 
     breakpoints: { [key: number]: IBreakpointRequest } = {};
     breakpointId = 0;
@@ -204,7 +230,7 @@ export class ArmaDebugEngine extends EventEmitter {
 
         this.client = net.connect('\\\\.\\pipe\\ArmaDebugEnginePipeIface', () => {
             this.connected = true;
-            this.sendCommand(this.nextHandle(), Commands.Hello);
+            this.sendCommand(this.nextHandle(), Commands.getVersionInfo);
         });
 
         this.client.on('data', (data) => {
@@ -242,13 +268,13 @@ export class ArmaDebugEngine extends EventEmitter {
     addBreakpoint(breakpoint: IBreakpointRequest) {
         this.breakpoints[this.breakpointId++] = breakpoint;
 
-        this.sendCommand(this.nextHandle(), Commands.AddBreakpoint, breakpoint);
+        this.sendCommand(this.nextHandle(), Commands.addBreakpoint, breakpoint);
 
         return this.breakpointId - 1;
     }
 
     removeBreakpoint(breakpoint: IBreakpointRequest) {
-        this.sendCommand(this.nextHandle(), Commands.RemoveBreakpoint, breakpoint);
+        this.sendCommand(this.nextHandle(), Commands.delBreakpoint, breakpoint);
     }
 
     clearBreakpoints(path: string) {
@@ -263,8 +289,12 @@ export class ArmaDebugEngine extends EventEmitter {
         });
     }
 
+    pause() {
+        this.sendCommand(this.nextHandle(), Commands.haltNow);
+    }
+
     continue(type: ContinueExecutionType = ContinueExecutionType.Continue) {
-        this.sendCommand(this.nextHandle(), Commands.ContinueExecution, type);
+        this.sendCommand(this.nextHandle(), Commands.BPContinue, type);
     }
 
 
@@ -277,6 +307,24 @@ export class ArmaDebugEngine extends EventEmitter {
         });
     }
 
+
+    evaluate(script: string): Promise<IValue> {
+        return new Promise((resolve, reject) => {
+            let request:IExecuteRequest = { 
+                script
+            };
+            let handle = this.nextHandle();
+            this.once('eval'+handle, (data, error) => {
+                if(error) {
+                    return reject(error);
+                } else {
+                    return resolve(data as IValue);
+                }
+            });
+            this.sendCommand(handle, Commands.ExecuteCode, request);
+        });
+    }
+
     getVariables(scope: VariableScope, names: string[]): Promise<IVariable[] | null> {
         return new Promise((resolve, reject) => {
             let request:IVariableRequest = { 
@@ -285,10 +333,10 @@ export class ArmaDebugEngine extends EventEmitter {
             };
             let handle = this.nextHandle();
             this.once('variable'+handle, data => {
-                //this.l(`getVariables ${scope}:${names} returned ${data[0].value}`);
+                this.v(`getVariables ${scope}:${names} returned ${data[0].value}`);
                 return resolve(data as IVariable[]);
             });
-            this.sendCommand(handle, Commands.GetVariable, request);
+            this.sendCommand(handle, Commands.getVariable, request);
         });
     }
 
@@ -299,7 +347,7 @@ export class ArmaDebugEngine extends EventEmitter {
             };
             let handle = this.nextHandle();
             this.once('variables'+handle, data => resolve(data));
-            this.sendCommand(handle, Commands.GetAvailableVariables, request);
+            this.sendCommand(handle, Commands.getAvailableVariables, request);
         });
     }
 
@@ -315,8 +363,27 @@ export class ArmaDebugEngine extends EventEmitter {
         return this.callStack;
     }
 
+    getCode(file:string): Promise<ISourceCode> {
+        return new Promise((resolve, reject) => {
+            let request:ICodeRequest = { 
+                file
+            };
+            let handle = this.nextHandle();
+            this.once(handle, message => message.code? resolve(message as ISourceCode) : reject(message.exception));
+            this.sendCommand(handle, Commands.getCurrentCode, request);
+        });
+    }
+
     private l(message: string) {
-        this.emit('log', message);
+        if(this.logging || this.verbose) {
+            this.emit('log', message);
+        }
+    }
+
+    private v(message: string) {
+        if(this.verbose) {
+            this.l(message);
+        }
     }
 
     private emitStep(type:string, message:IRemoteMessage) {
@@ -339,36 +406,35 @@ export class ArmaDebugEngine extends EventEmitter {
     }
 
     private receiveMessage(message: IRemoteMessage) {
-        //this.l("Received:");
-        //this.l(JSON.stringify(message));
+        this.v("RECEIVED:");
+        this.v(JSON.stringify(message));
 
         switch (message.command) {
-            case RemoteCommands.VersionInfo:
+            case RemoteCommands.versionInfo:
 
                 this.initialized = true;
                 this.emit('connected', message);
                 this.messageQueue.forEach(msg => this.send(msg));
                 this.messageQueue = [];
-
                 break;
             
-            case RemoteCommands.HaltStep:
+            case RemoteCommands.halt_step:
                 this.emitStep('halt-step', message);
                 break;
 
-            case RemoteCommands.HaltBreakpoint:
+            case RemoteCommands.halt_breakpoint:
                 this.emitStep('halt-breakpoint', message);
                 break;
 
-            case RemoteCommands.HaltError:
+            case RemoteCommands.halt_error:
                 this.emitStep('halt-error', message);
                 break;
 
-            case RemoteCommands.HaltScriptAssert:
+            case RemoteCommands.halt_scriptAsserts:
                 this.emitStep('halt-assert', message);
                 break;
 
-            case RemoteCommands.HaltScriptHalt:
+            case RemoteCommands.halt_scriptHalt:
                 this.emitStep('halt-halt', message);
                 break;
 
@@ -378,6 +444,14 @@ export class ArmaDebugEngine extends EventEmitter {
 
             case RemoteCommands.VariablesReturn:
                 this.emit('variables' + (message.handle || ''), message.data);
+                break;
+
+            case RemoteCommands.VariablesReturn:
+                this.emit('eval' + (message.handle || ''), message.data, message.error);
+                break;
+
+            default:
+                this.emit((message.handle || ''), message);
                 break;
         }
     }
@@ -391,13 +465,13 @@ export class ArmaDebugEngine extends EventEmitter {
     }
 
     private send(data: IClientMessage) {
-        if (!this.connected || (data.command !== Commands.Hello && !this.initialized)) {
+        if (!this.connected || (data.command !== Commands.getVersionInfo && !this.initialized)) {
             this.messageQueue.push(data);
             return;
         }
 
-        //this.l("Send:");
-        //this.l(JSON.stringify(data));
+        this.v("SEND:");
+        this.v(JSON.stringify(data));
         if (this.client) {
             this.client.write(JSON.stringify(data) + '\n');
         };

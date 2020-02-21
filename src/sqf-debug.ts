@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import * as path from 'path';
 
 import {
@@ -8,13 +9,15 @@ import {
 } from 'vscode-debugadapter';
 
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition } from './arma-debug-engine';
+import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition, ISourceCode } from './arma-debug-engine';
 import { trueCasePathSync } from 'true-case-path';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	//rptPath?: string
 	missionRoot?: string,
 	scriptPrefix?: string
+	logging: boolean;
+	verbose: boolean;
 }
 
 interface ICachedVariable {
@@ -33,6 +36,12 @@ function partition(array:any[], filter:(e:any, idx:number, arr:any[]) => boolean
 	return [pass, fail];
 }
 
+interface ISource {
+	id:number;
+	path:string;
+	code?:Promise<ISourceCode>;
+}
+
 export class SQFDebugSession extends DebugSession {
 	private static THREAD_ID = 1;
 	private static STACK_VARIABLES_ID = 200;
@@ -46,12 +55,20 @@ export class SQFDebugSession extends DebugSession {
 	private scriptPrefix: string = '';
 
 	private variables: ICachedVariable[] = [];
+	private sourceIndex: ISource[] = [];
+
+	private logging: boolean = false;
+	private verbose: boolean = false;
 
 	public constructor() {
 		super();
 		this.log('Constructing sqf debugger');
 		this.setDebuggerLinesStartAt1(true);
 		this.setDebuggerColumnsStartAt1(false);
+
+		let config = vscode.workspace.getConfiguration('sqf-debugger');
+		this.logging = config.get<boolean>('logging', false);
+		this.verbose = config.get<boolean>('verbose', false);
 	}
 
 	protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
@@ -60,16 +77,16 @@ export class SQFDebugSession extends DebugSession {
 		// The frontend will end the configuration sequence by calling 'configurationDone' request.
 		this.sendEvent(new InitializedEvent());
 		this.log('Initializing sqf debugger');
+
 		if(response.body) {
 			response.body.supportsCancelRequest = false;
 			response.body.supportsDataBreakpoints = false;
-			response.body.supportsEvaluateForHovers = false;
+			response.body.supportsEvaluateForHovers = true;
 		}
 
 		this.connect().then(() => 
 			this.sendResponse(response)
 		);
-		//let config = vscode.workspace.getConfiguration('sqf-debugger');
 	}
 
 	protected connect() : Promise<boolean> {
@@ -82,6 +99,8 @@ export class SQFDebugSession extends DebugSession {
 		this.variables = [];
 
 		this.debugger = new ArmaDebugEngine();
+		this.debugger.logging = this.logging;
+		this.debugger.verbose = this.verbose;
 		this.debugger.connect();
 
 		let connected = new Promise<boolean>( resolve =>
@@ -126,7 +145,7 @@ export class SQFDebugSession extends DebugSession {
 
 	// Debugger API implementation --------------
 	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
-		this.log(`Launching...`);
+		this.log(`Launching`);
 
 		this.missionRoot = args.missionRoot?.toLowerCase() || "";
 		this.scriptPrefix = args.scriptPrefix?.toLowerCase() || "";
@@ -161,6 +180,16 @@ export class SQFDebugSession extends DebugSession {
 		this.sendResponse(response);
 	}
 
+	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments, request?: DebugProtocol.Request): void {
+		this.log(`Pause`);
+		if (!this.debugger?.connected) {
+			this.log("Debugger not connected");
+			return;
+		}
+		this.debugger?.pause();
+		this.sendResponse(response);
+	}
+
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments) {
 		this.continue(response, ContinueExecutionType.Continue);
 	}
@@ -168,7 +197,7 @@ export class SQFDebugSession extends DebugSession {
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request): void {
 		this.continue(response, ContinueExecutionType.StepOver);
 	}
-	
+
 	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments, request?: DebugProtocol.Request): void {
 		this.continue(response, ContinueExecutionType.StepInto);
 	}
@@ -185,6 +214,43 @@ export class SQFDebugSession extends DebugSession {
 		}
 		this.debugger?.continue(type);
 		this.sendResponse(response);
+	}
+
+	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments, request?: DebugProtocol.Request): void {
+		this.sendResponse(response);
+		// if (!this.debugger?.connected) {
+		// 	this.log("Debugger not connected");
+		// 	return;
+		// }
+		// this.debugger?.evaluate(args.expression).then(val => {
+		// 	response.success = true;
+		// 	response.body.result = this.valueToString(val.value, val.type);
+		// 	this.sendResponse(response);
+		// }, err => {
+		// 	response.success = false;
+		// 	response.message = err;
+		// 	this.sendResponse(response);
+		// });
+	}
+
+	protected sourceRequest(response: DebugProtocol.SourceResponse, args: DebugProtocol.SourceArguments, request?: DebugProtocol.Request): void {
+		this.log(`Source requested for ${args.source?.name} (${args.sourceReference})`);
+
+		let code = this.getCachedSource(args.sourceReference)?.code;
+		if(code) {
+			code.then(c => {
+				response.body.content = c.code;
+				this.sendResponse(response);
+			}, error => {
+				response.success = false;
+				response.message = `Source could not be retrieved`;
+				this.sendResponse(response);
+			});
+		} else {
+			response.success = false;
+			response.message = `Cached source not found`;
+			this.sendResponse(response);
+		}
 	}
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments) {
@@ -393,7 +459,9 @@ export class SQFDebugSession extends DebugSession {
 
 	// Implementation details --------------
 	protected log(msg: string) {
-		this.sendEvent(new OutputEvent(`${msg}\n`));
+		if(this.logging) {
+			this.sendEvent(new OutputEvent(`${msg}\n`));
+		};
 	}
 
 	protected cacheVariable(name: string, scope: VariableScope, parent?: string, type?: string, value?: string | number | IValue[]): ICachedVariable {
@@ -471,9 +539,9 @@ export class SQFDebugSession extends DebugSession {
 		if(value === null) {
 			return '<null>';
 		}
-		// if(type === "string") {
-		// 	return value as string;
-		// }
+		if(type === "string" && value === "") {
+			return value === ""? `""` : value as string;
+		}
 		return JSON.stringify(value);
 	}
 
@@ -611,8 +679,48 @@ export class SQFDebugSession extends DebugSession {
 		return trueCasePathSync(sourceFile);
 	}
 
+	private cacheSource(path: string): ISource {
+		let index = this.sourceIndex.findIndex(v => v.path === path);
+
+		if (index < 0) {
+			index = this.sourceIndex.length;
+			this.sourceIndex.push({ path, id: index });
+		}
+
+		let sourceCache = this.sourceIndex[index];
+		if(this.debugger && !sourceCache.code) {
+			sourceCache.code = this.debugger.getCode(path);
+		}
+		return sourceCache;
+	}
+
+	private getCachedSource(id: number): ISource | undefined {
+		if (id < this.sourceIndex.length) {
+			let sourceCache = this.sourceIndex[id];
+			if(this.debugger && !sourceCache.code) {
+				sourceCache.code = this.debugger.getCode(sourceCache.path);
+			}
+			return sourceCache;
+		} else {
+			return undefined;
+		}
+	}
+
 	private createSource(filePath?: string): Source | undefined {
-		return filePath? new Source(path.basename(filePath), this.convertDebuggerPathToClient(filePath), undefined, undefined, 'sqf-debugger-data') : undefined;
+		if(filePath) {
+			let mappedPath;
+			let sourceRef = 0;
+			try {
+				mappedPath = this.convertDebuggerPathToClient(filePath);
+			} catch (error) {
+				this.log(`Can't determine source path for ${filePath}, requesting from server`);
+				//WIP crashes in arma currently
+				// sourceRef = this.cacheSource(filePath).id;
+			}
+			return new Source(path.basename(filePath), mappedPath, sourceRef, 'arma', 'sqf-debugger-data');
+		} else {
+			return undefined;
+		}
 	}
 }
 

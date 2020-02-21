@@ -1,7 +1,7 @@
 {
 	"name": "sqf-debugger",
 	"displayName": "SQF Debugger",
-	"description": "Arma 3 SQF Debugger. Requres Arma Debug Engine (https://steamcommunity.com/sharedfiles/filedetails/?id=1585582292).",
+	"description": "Arma 3 SQF Debugger. Requires [Arma Debug Engine](https://steamcommunity.com/sharedfiles/filedetails/?id=1585582292), and [SQF Language](https://marketplace.visualstudio.com/items?itemName=Armitxes.sqf).\nBased on unfinished implementation in [SQF Lint](https://github.com/SkaceKamen/vscode-sqflint/tree/feature-armadebug).",
 	"publisher": "billw2011",
 	"repository": {
 		"url": "https://github.com/Vindicta-Team/vscode-sqf-debugger"
@@ -24,6 +24,23 @@
 		"onDebug"
 	],
 	"contributes": {
+		"configuration": {
+			"title": "SQF Debugger",
+			"properties": {
+				"sqf-debugger.logging": {
+					"description": "Enable logging for debugging purposes",
+					"type": "boolean",
+					"default": false,
+					"title": "Logging"
+				},
+				"sqf-debugger.verbose": {
+					"description": "Enable verbose logging including all ADE communication",
+					"type": "boolean",
+					"default": false,
+					"title": "Verbose"
+				}
+			}
+		},
 		"breakpoints": [
 			{
 				"language": "sqf"
