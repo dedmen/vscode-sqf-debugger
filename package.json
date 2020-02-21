@@ -8,7 +8,7 @@
 		"email": "billw2011@gmail.com"
 	},
 	"license": "MIT",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"engines": {
 		"vscode": "^1.42.0"
 	},
@@ -17,7 +17,9 @@
 	],
 	"private": true,
 	"main": "./out/extension",
-	"activationEvents": ["onDebug"],
+	"activationEvents": [
+		"onDebug"
+	],
 	"contributes": {
 		"breakpoints": [
 			{
