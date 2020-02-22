@@ -38,6 +38,24 @@
 					"type": "boolean",
 					"default": false,
 					"title": "Verbose"
+				},
+				"sqf-debugger.getSourceFromADE": {
+					"description": "Attempt to get source code from ADE, when local path cannot be resolved",
+					"type": "boolean",
+					"default": false,
+					"title": "getSourceFromADE"
+				},
+				"sqf-debugger.allowEval": {
+					"description": "Allow evaluation of expressions (hover, watch, debug console)",
+					"type": "boolean",
+					"default": false,
+					"title": "allowEval"
+				},
+				"sqf-debugger.enableOOPExtensions": {
+					"description": "Enable Sparker OOP extensions (o_ prefixes on strings are interpreted as OOP object handles)",
+					"type": "boolean",
+					"default": true,
+					"title": "enableOOPExtensions"
 				}
 			}
 		},

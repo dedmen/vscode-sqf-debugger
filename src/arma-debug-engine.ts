@@ -57,8 +57,9 @@ enum Commands {
     getCurrentCode = 8,
     getAllScriptCommands = 9,
     getAvailableVariables = 10,
-    haltNow, // Triggers halt on next possible instruction
-    ExecuteCode // Executes code while halted, in current context and returns result
+    haltNow = 11, // Triggers halt on next possible instruction
+    ExecuteCode = 12, // Executes code while halted, in current context and returns result
+    LoadFile = 13 // load a file and return the contents
 }
 
 export enum ContinueExecutionType {
@@ -82,7 +83,8 @@ enum RemoteCommands {
     VariablesReturn = 10,
     BreakpointLog = 11, // A log breakpoint was triggered
     LogMessage = 12, // A log message from the game, for example from echo script command
-    ExecuteCodeResult = 13 // Result of ExecuteCode command
+    ExecuteCodeResult = 13, // Result of ExecuteCode command
+    LoadFileResult = 14
 }
 
 enum DebuggerState {
@@ -101,7 +103,15 @@ export enum VariableScope {
     ParsingNamespace = 32
 };
 
-interface IRemoteMessage {
+export interface IError {
+    content: string;
+    filename: string;
+    fileOffset: number[];
+    message: string;
+    type: number;
+};
+
+export interface IRemoteMessage {
     handle?: string;
     command: RemoteCommands;
     data: any;
@@ -112,7 +122,8 @@ interface IRemoteMessage {
     version?: string;
     arch?: string;
     state?: DebuggerState;
-    error?: string;
+    error?: string | IError;
+    halt?: IError;
 
     code?: string;
     fileName?: string;
@@ -129,9 +140,9 @@ interface ICompiledInstruction {
 interface IClientMessage {
     handle: string;
     command: Commands;
-    data: any;
+    data?: any;
+    file?: string; // for getting code
 }
-
 
 export interface IValue {
     type: 'string' | 'nil' | 'float' | 'array';
@@ -173,12 +184,12 @@ interface IExecuteRequest {
 }
 
 interface ICodeRequest {
-    file: string;
+    path: string;
 }
 
 export interface ISourceCode {
-    code: string;
-    fileName: string;
+    content: string;
+    path: string;
 }
 
 export class ArmaDebugEngine extends EventEmitter {
@@ -223,39 +234,51 @@ export class ArmaDebugEngine extends EventEmitter {
         super();
     }
 
-    connect() {
+    connect(): Promise<void> {
         if (this.connected) {
-            throw new Error('Trying to connect when already connected.');
+            return Promise.resolve();
         }
 
-        this.client = net.connect('\\\\.\\pipe\\ArmaDebugEnginePipeIface', () => {
-            this.connected = true;
-            this.sendCommand(this.nextHandle(), Commands.getVersionInfo);
-        });
+        return new Promise<void>((resolve, reject) => {
+            setTimeout(() => {
+                reject('Timed out');
+            }, 10000);
 
-        this.client.on('data', (data) => {
-            data.toString().split('\n').filter(str => str).forEach(str => {
-                this.receiveMessage(JSON.parse(str) as IRemoteMessage);
+            this.on('connected', () => {
+                resolve();
             });
-        });
+            
+            this.client = net.connect('\\\\.\\pipe\\ArmaDebugEnginePipeIface', () => {
+                this.connected = true;
+                this.sendCommand(this.nextHandle(), Commands.getVersionInfo);
+                resolve();
+            });
 
-        this.client.on('close', () => {
-            this.connected = false;
-            this.initialized = false;
-            this.client = null;
-            //setTimeout(() => this.connect(), 1000);
-        });
-        
-        this.client.on('error', (err) => {
-            if(err.name === 'ENOENT') {
-                this.l(`Server not available, did you load ADE correctly?`);
-            } else {
-                this.l(`Socket error: ${JSON.stringify(err)}`);
-            };
-            this.connected = false;
-            this.client = null;
+            this.client.on('data', (data) => {
+                data.toString().split('\n').filter(str => str).forEach(str => {
+                    this.receiveMessage(JSON.parse(str) as IRemoteMessage);
+                });
+                resolve();
+            });
 
-            //setTimeout(() => this.connect(), 1000);
+            this.client.on('close', () => {
+                this.connected = false;
+                this.initialized = false;
+                this.client = null;
+                this.emit('disconnected');
+                reject('Closed');
+            });
+            
+            this.client.on('error', (err) => {
+                if((err as any)?.errno === 'ENOENT') {
+                    this.error(`Server not available, did you load ADE correctly?`);
+                } else {
+                    this.error(`Socket error: ${JSON.stringify(err)}`);
+                };
+                this.connected = false;
+                this.client = null;
+                reject('Error');
+            });
         });
     }
 
@@ -280,7 +303,7 @@ export class ArmaDebugEngine extends EventEmitter {
     clearBreakpoints(path: string) {
         this.l(`clearing ${JSON.stringify(this.breakpoints)} breakpoints for ${path}`);
         Object.entries(this.breakpoints).forEach((value: [string, IBreakpointRequest]) => {
-            this.l(`clearing breakpoints for ${path}: ${value}`);
+            this.l(`clearing breakpoint for ${path}: ${value}`);
             let breakpoint = value[1]; //this.breakpoints[index] as IBreakpointRequest;
             if (breakpoint.filename && breakpoint.filename.toLowerCase() === path.toLowerCase()) {
                 this.removeBreakpoint(breakpoint);
@@ -304,12 +327,27 @@ export class ArmaDebugEngine extends EventEmitter {
                 return vars[0];
             }
             return null;
-        });
+        }).catch(err => null);
     }
 
 
+    executeRaw(cmd: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            setTimeout(() => reject('Timed out'), 10000);
+            try {
+                let json = JSON.parse(cmd);
+                json.handle = this.nextHandle();
+                this.send(json);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
     evaluate(script: string): Promise<IValue> {
         return new Promise((resolve, reject) => {
+            setTimeout(() => reject('Timed out'), 10000);
             let request:IExecuteRequest = { 
                 script
             };
@@ -327,13 +365,13 @@ export class ArmaDebugEngine extends EventEmitter {
 
     getVariables(scope: VariableScope, names: string[]): Promise<IVariable[] | null> {
         return new Promise((resolve, reject) => {
+            setTimeout(() => reject('Timed out'), 5000);
             let request:IVariableRequest = { 
                 scope,
                 name: names
             };
             let handle = this.nextHandle();
             this.once('variable'+handle, data => {
-                this.v(`getVariables ${scope}:${names} returned ${data[0].value}`);
                 return resolve(data as IVariable[]);
             });
             this.sendCommand(handle, Commands.getVariable, request);
@@ -342,6 +380,7 @@ export class ArmaDebugEngine extends EventEmitter {
 
     getVariablesInScope(scope: VariableScope, ): Promise<any> {
         return new Promise((resolve, reject) => {
+            setTimeout(() => reject('Timed out'), 10000);
             let request:IVariableListRequest = { 
                 scope
             };
@@ -354,7 +393,6 @@ export class ArmaDebugEngine extends EventEmitter {
     getStackVariables(frame:number) {
         return (this.callStack && this.callStack.length > frame) ? 
             this.callStack.slice(0, frame+1).map(c => c.variables).reduceRight((prev, curr) => Object.assign(prev, curr), {})
-            //this.callStack[frame].variables
             :
             null;
     }
@@ -363,14 +401,17 @@ export class ArmaDebugEngine extends EventEmitter {
         return this.callStack;
     }
 
-    getCode(file:string): Promise<ISourceCode> {
+    getCode(path:string): Promise<ISourceCode> {
         return new Promise((resolve, reject) => {
+            //setTimeout(() => reject('Timed out'), 10000);
             let request:ICodeRequest = { 
-                file
+                path
             };
             let handle = this.nextHandle();
-            this.once(handle, message => message.code? resolve(message as ISourceCode) : reject(message.exception));
-            this.sendCommand(handle, Commands.getCurrentCode, request);
+            this.once('load' + handle, message => {
+                resolve(message as ISourceCode);
+            });
+            this.sendCommand(handle, Commands.LoadFile, request);
         });
     }
 
@@ -386,7 +427,11 @@ export class ArmaDebugEngine extends EventEmitter {
         }
     }
 
-    private emitStep(type:string, message:IRemoteMessage) {
+    private error(message: string) {
+        this.emit('error', message);
+    }
+
+    private emitStep(type:string, message:IRemoteMessage, error?:IError) {
         this.callStack = message.callstack;
 
         if (this.callStack) {
@@ -402,7 +447,7 @@ export class ArmaDebugEngine extends EventEmitter {
             this.callStack[this.callStack.length - 1].fileName = message.instruction.filename;
         }
 
-        this.emit(type, message.callstack);
+        this.emit(type, error || message);
     }
 
     private receiveMessage(message: IRemoteMessage) {
@@ -411,7 +456,6 @@ export class ArmaDebugEngine extends EventEmitter {
 
         switch (message.command) {
             case RemoteCommands.versionInfo:
-
                 this.initialized = true;
                 this.emit('connected', message);
                 this.messageQueue.forEach(msg => this.send(msg));
@@ -427,15 +471,15 @@ export class ArmaDebugEngine extends EventEmitter {
                 break;
 
             case RemoteCommands.halt_error:
-                this.emitStep('halt-error', message);
+                this.emitStep('halt-error', message, message.error as IError);
                 break;
 
             case RemoteCommands.halt_scriptAsserts:
-                this.emitStep('halt-assert', message);
+                this.emitStep('halt-assert', message, message.error as IError);
                 break;
 
             case RemoteCommands.halt_scriptHalt:
-                this.emitStep('halt-halt', message);
+                this.emitStep('halt-halt', message, message.error as IError);
                 break;
 
             case RemoteCommands.VariableReturn:
@@ -448,6 +492,10 @@ export class ArmaDebugEngine extends EventEmitter {
 
             case RemoteCommands.VariablesReturn:
                 this.emit('eval' + (message.handle || ''), message.data, message.error);
+                break;
+
+            case RemoteCommands.LoadFileResult:
+                this.emit('load' + (message.handle || ''), message.data, message.error);
                 break;
 
             default:
@@ -470,10 +518,16 @@ export class ArmaDebugEngine extends EventEmitter {
             return;
         }
 
-        this.v("SEND:");
-        this.v(JSON.stringify(data));
         if (this.client) {
-            this.client.write(JSON.stringify(data) + '\n');
-        };
+            this.v("SEND:");
+            this.v(JSON.stringify(data));
+            this.client.write(JSON.stringify(data) + '\n', err => {
+                if(err) {
+                    this.emit('error', err.message);
+                };
+            });
+        } else {
+            this.error("Client is invalid can't send!");
+        }
     }
 }
