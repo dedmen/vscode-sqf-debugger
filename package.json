@@ -11,7 +11,7 @@
 		"email": "billw2011@gmail.com"
 	},
 	"license": "MIT",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"engines": {
 		"vscode": "^1.42.0"
 	},
