@@ -17,28 +17,38 @@ This extension is based on unfinished implementation by SkaceKamen in [SQF Lint]
 - [Arma Debug Engine](https://steamcommunity.com/sharedfiles/filedetails/?id=1585582292) Arma 3 mod
 - [SQF Language](https://marketplace.visualstudio.com/items?itemName=Armitxes.sqf) Visual Studio Code extension
 
+## Features
+
+- Entire callstack
+- All variables in all scopes inspectable - `local`, `stack`, `missionNamespace`, `uiNamespace`, `profileNamespace`, `parsingNamespace`
+- Manual breakpoints
+- Source stepping - step over, out, into
+- Exceptions, `halt`, and `assert` will break into debugger automatically
+- *_Experimental_*: advanced breakpoints - conditional, logging, and hit count
+- *_Experimental_*: expression evaluation, debug console
+- *_Experimental_*: source server - if local file isn't found, it will be requested directly from Arma
+
 ## Instructions
 
 1. Install and activate the Arma Debug Engine and pre-requisite mods
-2. Run a mission you want to debug via the Eden editor
-3. Open the mission script directory in VSCode
-4. Press F5 (or run via the Debug sidebar)
-5. A new default launch configuration should be created automatically for you
-6. Place breakpoints in your code to debug it at those locations
+2. **Disable BattleEye**
+3. **Disable BattleEye!!**
+4. Run a mission you want to debug via the Eden editor
+5. Open the mission script directory in VSCode
+6. Press F5 (or run via the Debug sidebar)
+7. A new default launch configuration should be created automatically for you
+8. Place breakpoints in your code to debug it at those locations
 
 ## Known Issues
 
-- Sometimes scopes won't resolve -- restart debugging to fix
 - Breakpoints aren't validated -- if they don't match a real instruction in Arma they will just not fire
 - In some cases breakpoints won't be on the correct line (see Trouble Shooting)
+- Source server may only returns one file and stop further debugging until Arma is restarted
+- Expression evaluation may cause crashes
 
 ## Not Implemented
 
-- Watches
-- Expression evaluation (hover, debug console)
 - Threads
-- Pause
-- Source code from game
 
 ## Trouble Shooting
 
@@ -53,5 +63,6 @@ line numbering totally.
 - Try adding more breakpoints around the line you are trying to hit.  
 
 If the server won't connect: 
+- Confirm you disabled BattleEye
 - Double check Arma Debug Engine is enabled and on the latest version. Seeing a warning dialog on start up is a dead giveaway that it is loading correctly. Check your intercept_dll.log at `C:\Program Files (x86)\Steam\steamapps\common\Arma 3\Logs\intercept_dll.log`.  
 - Restart both VSCode and Arma 3.
