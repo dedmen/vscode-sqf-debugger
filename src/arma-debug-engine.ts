@@ -59,7 +59,9 @@ enum Commands {
     getAvailableVariables = 10,
     haltNow = 11, // Triggers halt on next possible instruction
     ExecuteCode = 12, // Executes code while halted, in current context and returns result
-    LoadFile = 13 // load a file and return the contents
+    LoadFile = 13, // load a file and return the contents
+    clearAllBreakpoints = 14,
+    clearFileBreakpoints = 15
 }
 
 export enum ContinueExecutionType {
@@ -106,7 +108,7 @@ export enum VariableScope {
 export interface IError {
     content: string;
     filename: string;
-    fileOffset: number[];
+    fileOffset: { 0: number; 1: number; 2: number };
     message: string;
     type: number;
 };
@@ -152,18 +154,14 @@ export interface IValue {
 export interface ICallStackItem {
     contentSample: string;
     fileName?: string;
-    ip: string;
+    ip?: string;
     lastInstruction: ICompiledInstruction,
-    type: string;
-    variables: {
+    type?: string;
+    variables?: {
         [key: string]: IValue
     };
-    fileOffset?: {
-        0: number;
-        1: number;
-        2: number;
-    };
-    compiled: ICompiledInstruction[];
+    fileOffset?: { 0: number; 1: number; 2: number };
+    compiled?: ICompiledInstruction[];
 }
 
 export interface IVariable extends IValue {
@@ -295,9 +293,17 @@ export class ArmaDebugEngine extends EventEmitter {
 
         return this.breakpointId - 1;
     }
-
+    
     removeBreakpoint(breakpoint: IBreakpointRequest) {
         this.sendCommand(this.nextHandle(), Commands.delBreakpoint, breakpoint);
+    }
+
+    clearAllBreakpoints() {
+        this.sendCommand(this.nextHandle(), Commands.clearAllBreakpoints);
+    }
+
+    clearFileBreakpoints(filename:string) {
+        this.sendCommand(this.nextHandle(), Commands.clearFileBreakpoints, { filename });
     }
 
     clearBreakpoints(path: string) {
@@ -392,7 +398,7 @@ export class ArmaDebugEngine extends EventEmitter {
 
     getStackVariables(frame:number) {
         return (this.callStack && this.callStack.length > frame) ? 
-            this.callStack.slice(0, frame+1).map(c => c.variables).reduceRight((prev, curr) => Object.assign(prev, curr), {})
+            this.callStack.slice(0, frame+1).map(c => c.variables).reduceRight((prev, curr) => Object.assign({}, curr, prev), {})
             :
             null;
     }
@@ -445,6 +451,20 @@ export class ArmaDebugEngine extends EventEmitter {
         if (message.instruction && this.callStack && !this.callStack[this.callStack.length - 1].fileOffset) {
             this.callStack[this.callStack.length - 1].fileOffset = message.instruction.fileOffset;
             this.callStack[this.callStack.length - 1].fileName = message.instruction.filename;
+        }
+
+        if(error && this.callStack) {
+            this.callStack.push({
+                fileName: error.filename,
+                fileOffset: error.fileOffset,
+                contentSample: error.content,
+                lastInstruction: {
+                    fileOffset: error.fileOffset,
+                    filename: error.filename,
+                    name: error.message,
+                    type: 'exception'
+                }
+            });
         }
 
         this.emit(type, error || message);
