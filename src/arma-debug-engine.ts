@@ -1,4 +1,4 @@
-import * as net from 'net';
+import * as WebSocket from 'ws';
 import { EventEmitter } from 'events';
 
 
@@ -196,7 +196,7 @@ export class ArmaDebugEngine extends EventEmitter {
 
     messageQueue: IClientMessage[] = [];
 
-    client: net.Socket | null = null;
+    client: WebSocket | null = null;
 
     callStack?: ICallStackItem[];
 
@@ -246,16 +246,11 @@ export class ArmaDebugEngine extends EventEmitter {
                 resolve();
             });
             
-            this.client = net.connect('\\\\.\\pipe\\ArmaDebugEnginePipeIface', () => {
+            const ADE_PORT = 9002;
+            this.client = new WebSocket(`ws://localhost:${ADE_PORT}`);
+            this.client.on('open', () => {
                 this.connected = true;
                 this.sendCommand(this.nextHandle(), Commands.getVersionInfo);
-                resolve();
-            });
-
-            this.client.on('data', (data) => {
-                data.toString().split('\n').filter(str => str).forEach(str => {
-                    this.receiveMessage(JSON.parse(str) as IRemoteMessage);
-                });
                 resolve();
             });
 
@@ -266,22 +261,27 @@ export class ArmaDebugEngine extends EventEmitter {
                 this.emit('disconnected');
                 reject('Closed');
             });
+
+            this.client.on('message', (msg:string) => {
+                this.receiveMessage(JSON.parse(msg) as IRemoteMessage);
+                resolve();
+            });
             
-            this.client.on('error', (err) => {
-                if((err as any)?.errno === 'ENOENT') {
-                    this.error(`Server not available, did you load ADE correctly?`);
+            this.client.on('error', (err:Error) => {
+                if((err as any)?.code === 'ECONNREFUSED') {
+                    this.error(`Could not connect to Arma Debug Engine`);
                 } else {
-                    this.error(`Socket error: ${JSON.stringify(err)}`);
-                };
+                    this.error(`Socket error: ${err.message}`);
+                }
                 this.connected = false;
                 this.client = null;
-                reject('Error');
+                reject(err.name);
             });
         });
     }
 
     end() {
-        this.client?.destroy();
+        this.client?.close();
     }
 
     protected nextHandle():string { return (++this.nextRequestId).toString(); }
@@ -541,7 +541,7 @@ export class ArmaDebugEngine extends EventEmitter {
         if (this.client) {
             this.v("SEND:");
             this.v(JSON.stringify(data));
-            this.client.write(JSON.stringify(data) + '\n', err => {
+            this.client.send(JSON.stringify(data) + '\n', err => {
                 if(err) {
                     this.emit('error', err.message);
                 };
