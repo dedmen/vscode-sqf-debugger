@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('sqf', factory));
 	if ('dispose' in factory) {
-		context.subscriptions.push(factory);
+		context.subscriptions.push(<vscode.DebugAdapterDescriptorFactory & Record<"dispose", any>>factory);
 	}
 };
 

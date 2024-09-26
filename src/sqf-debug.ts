@@ -9,7 +9,7 @@ import {
 } from 'vscode-debugadapter';
 
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition, ISourceCode, IRemoteMessage, IError } from './arma-debug-engine';
+import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, ScriptErrorType, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition, ISourceCode, IRemoteMessage, IError } from './arma-debug-engine';
 import { trueCasePathSync } from 'true-case-path';
 import { Message } from 'vscode-debugadapter/lib/messages';
 
@@ -68,7 +68,7 @@ export class SQFDebugSession extends DebugSession {
 
 	private logging: boolean = false;
 	private verbose: boolean = false;
-	private getSourceFromADE: boolean = false;
+	private getSourceFromADE: boolean = true;
 	private allowEval: boolean = false;
 	private enableOOPExtensions: boolean = true;
 
@@ -81,7 +81,7 @@ export class SQFDebugSession extends DebugSession {
 		const config = vscode.workspace.getConfiguration('sqf-debugger');
 		this.logging = config.get<boolean>('logging', false);
 		this.verbose = config.get<boolean>('verbose', false);
-		this.getSourceFromADE = config.get<boolean>('getSourceFromADE', false);
+		this.getSourceFromADE = config.get<boolean>('getSourceFromADE', true);
 		this.allowEval = config.get<boolean>('allowEval', false);
 		this.enableOOPExtensions = config.get<boolean>('enableOOPExtensions', true);
 	}
@@ -95,8 +95,43 @@ export class SQFDebugSession extends DebugSession {
 
 		if (response.body) {
 			response.body.supportsCancelRequest = false;
-			response.body.supportsDataBreakpoints = false;
+			
 			response.body.supportsEvaluateForHovers = this.allowEval;
+
+			// Breakpoints
+			response.body.supportsDataBreakpoints = false;
+			response.body.supportsConditionalBreakpoints = true;
+			response.body.supportsLogPoints = true;
+			//response.body.supportsDataBreakpoints
+			//response.body.supportsBreakpointLocationsRequest //#TODO, iterate all instructions and collect lines and columns of instructions
+
+			// Exception 
+			response.body.exceptionBreakpointFilters = [
+				{"filter":ScriptErrorType[ScriptErrorType.gen], "label":"Generic Error", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.expo], "label":"Exponent out of range", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.num], "label":"Invalid number in expression", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.var], "label":"Undefined variable in expressio", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.bad_var], "label":"Reserved variable in expression", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.div_zero], "label":"Zero divisor", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.type], "label":"Type %s, expected %s", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.name_space], "label":"Local variable in global space", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.dim], "label":"%d elements provided, %d expected", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.halt_function], "label":"Debugger breakpoint hit", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.foreign], "label":"Foreign error: %s", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.unhandled_exception], "label":"Unhandled exception: %s", "default":true},
+				{"filter":ScriptErrorType[ScriptErrorType.stack_overflow], "label":"Stack Overflow", "default":true}
+			];
+			response.body.supportsExceptionOptions = false; // Seems not applicable to Arma
+			//response.body.supportsExceptionInfoRequest = true; //#TODO
+
+
+			//response.body.supportsDisassembleRequest
+			//response.body.supportsSetVariable // todo
+			//response.body.supportsModulesRequest // #TODO all functions?
+			//response.body.supportsLoadedSourcesRequest // #TODO all functions?
+
+
+
 		}
 
 		this.connect().then(() =>
@@ -356,6 +391,35 @@ export class SQFDebugSession extends DebugSession {
 
 		this.sendResponse(response);
 	}
+
+	protected setExceptionBreakPointsRequest(response: DebugProtocol.SetExceptionBreakpointsResponse, args: DebugProtocol.SetExceptionBreakpointsArguments, request?: DebugProtocol.Request) {
+
+		if (!this.debugger?.connected) {
+			this.sendDebuggerNotConnected(response);
+			return;
+		}
+
+
+		// Build new breakpoints
+		let filters: number[] = args.filters?.map(filterName => {
+			
+			return ScriptErrorType[filterName as keyof typeof ScriptErrorType];
+		}) || [];
+
+		this.debugger?.setExceptionFilter(filters);
+
+
+		response.body = {
+			/*
+			For backward compatibility both the breakpoints array and the enclosing body are optional.
+			If these elements are missing a client is not able to show problems for individual exception breakpoints or filters.
+			*/
+		};
+
+		this.sendResponse(response);
+
+	}
+
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments) {
 		const scopes = new Array<Scope>();

@@ -61,7 +61,8 @@ enum Commands {
     ExecuteCode = 12, // Executes code while halted, in current context and returns result
     LoadFile = 13, // load a file and return the contents
     clearAllBreakpoints = 14,
-    clearFileBreakpoints = 15
+    clearFileBreakpoints = 15,
+    SetExceptionFilter = 16
 }
 
 export enum ContinueExecutionType {
@@ -104,6 +105,42 @@ export enum VariableScope {
     ProfileNamespace = 16,
     ParsingNamespace = 32
 };
+
+export enum ScriptErrorType {
+    ok = 0,
+    gen = 1,                        //Generic error in expression
+    expo = 2,                       //Exponent out of range or invalid
+    num = 3,                        //Invalid number in expression
+    var = 4,                        //Undefined variable in expression: %s
+    bad_var = 5,                    //Reserved variable in expression
+    div_zero = 6,                   //Zero divisor
+    tg90 = 7,                       //Tangents of 90 degrees
+    openparenthesis = 8,            //Missing (
+    closeparenthesis = 9,           //Missing )
+    open_brackets = 10,              //Missing [
+    close_brackets = 11,             //Missing ]
+    open_braces = 12,                //Missing {
+    close_braces = 13,               //Missing }
+    equ = 14,                        //Missing =
+    semicolon = 15,                  //Missing ;
+    quote = 16,                      //Missing ""
+    single_quote = 17,               //Missing '
+    oper = 18,                       //Unknown operator %s
+    line_long = 19,                  //Line is too long
+    type = 20,                       //Type %s, expected %s
+    name_space = 21,                 //Local variable in global space
+    dim = 22,                        //%d elements provided, %d expected
+    unexpected_closeb = 23,          //unexpected )
+    assertion_failed = 24,           //Assertation failed
+    halt_function = 25,              //Debugger breakpoint hit
+    foreign = 26,                    //Foreign error: %s
+    scope_name_defined_twice = 27,   //Scope name defined twice
+    scope_not_found = 28,
+    invalid_try_block = 29,
+    unhandled_exception = 30,        //Unhandled exception: %s
+    stack_overflow = 31,
+    handled = 32
+}
 
 export interface IError {
     content: string;
@@ -318,6 +355,10 @@ export class ArmaDebugEngine extends EventEmitter {
         });
     }
 
+    setExceptionFilter(filters: number[]) {
+        this.sendCommand(this.nextHandle(), Commands.SetExceptionFilter, { "scriptErrFilters": filters });
+	}
+
     pause() {
         this.sendCommand(this.nextHandle(), Commands.haltNow);
     }
@@ -344,7 +385,7 @@ export class ArmaDebugEngine extends EventEmitter {
                 let json = JSON.parse(cmd);
                 json.handle = this.nextHandle();
                 this.send(json);
-                resolve();
+                resolve("");
             } catch (error) {
                 reject(error);
             }
