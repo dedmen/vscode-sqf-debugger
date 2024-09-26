@@ -390,7 +390,15 @@ export class SQFDebugSession extends DebugSession {
 				idx,
 				SQFDebugSession.getStackframeName(srcFrame.lastInstruction.name, srcFrame.contentSample),
 				//text_truncate(srcFrame.contentSample ? srcFrame.contentSample : srcFrame.lastInstruction.name.replace('\n', ' ')),
-				this.createSource(srcFrame.lastInstruction.filename),
+				
+				srcFrame.lastInstruction.filename !== '' ? this.createSource(srcFrame.lastInstruction.filename) : 
+				(
+					// If there is no filename, the debugger probably sends us full content
+					srcFrame.content != null ? 
+						new Source("unknownPath", undefined, this.cacheSourceNoFile(srcFrame.content).id, 'arma', 'sqf-debugger-data')
+					:
+						undefined
+				),
 				this.convertDebuggerLineToClient(srcFrame.lastInstruction.fileOffset[0]),
 				this.convertDebuggerColumnToClient(srcFrame.lastInstruction.fileOffset[2])
 			);
@@ -817,6 +825,27 @@ export class SQFDebugSession extends DebugSession {
 			this.log(`Can't determine source path for ${path}, requesting from server`);
 			sourceCache.code = this.debugger.getCode(path);
 		}
+		return sourceCache;
+	}
+
+	// Insert a source into the cache, without providing a filename, filename is unknown.
+	//#TODO thus there is also no way to remove it from cache, unknown paths should be removed when debug session ends, or when execution is resumed, temporary sources are usually only present during a breakpoint
+	private cacheSourceNoFile(fileContent: string): ISource {
+
+		let index = -1; // We don't need to search because we can't find it. //#TODO We could optimize here and compare the code for equality, so we don't double cache the same code.
+		if (index < 0) {
+			index = this.sourceIndex.length;
+			this.sourceIndex.push({ path: "unknownPath", id: index + 1 });
+		}
+
+		const sourceCache = this.sourceIndex[index];
+		sourceCache.code = new Promise((resolve, reject) => {
+			resolve({
+				content: fileContent,
+				path: "unknownPath"
+			});
+        });
+
 		return sourceCache;
 	}
 
