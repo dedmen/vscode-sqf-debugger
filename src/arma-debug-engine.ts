@@ -199,6 +199,7 @@ export interface ICallStackItem {
     };
     fileOffset?: { 0: number; 1: number; 2: number };
     compiled?: ICompiledInstruction[];
+    content?: string;
 }
 
 export interface IVariable extends IValue {
