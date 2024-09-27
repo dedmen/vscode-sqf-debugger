@@ -63,7 +63,8 @@ enum Commands {
     clearAllBreakpoints = 14,
     clearFileBreakpoints = 15,
     SetExceptionFilter = 16,
-    FetchAllFunctionsInNamespace = 17
+    FetchAllFunctionsInNamespace = 17,
+    FetchInstructionRef = 18
 }
 
 export enum ContinueExecutionType {
@@ -89,7 +90,8 @@ enum RemoteCommands {
     LogMessage = 12, // A log message from the game, for example from echo script command
     ExecuteCodeResult = 13, // Result of ExecuteCode command
     LoadFileResult = 14,
-    AllFunctionsInNamespaceResult = 15
+    AllFunctionsInNamespaceResult = 15,
+    InstructionRefResult = 16
 }
 
 enum DebuggerState {
@@ -202,6 +204,7 @@ export interface ICallStackItem {
     fileOffset?: { 0: number; 1: number; 2: number };
     compiled?: ICompiledInstruction[];
     content?: string;
+    instructionRef?: string;
 }
 
 export interface IVariable extends IValue {
@@ -485,6 +488,17 @@ export class ArmaDebugEngine extends EventEmitter {
         });
     }
 
+    getInstructionRefContent(instructionRef: string): Promise<ICompiledInstruction[]> {
+        return new Promise((resolve, reject) => {
+            //setTimeout(() => reject('Timed out'), 10000);
+            let handle = this.nextHandle();
+            this.once('instructionRefRes' + handle, message => {
+                resolve(message.instructions as ICompiledInstruction[]);
+            });
+            this.sendCommand(handle, Commands.FetchInstructionRef, { instructionRef });
+        });
+    }
+
     private l(message: string) {
         if(this.logging || this.verbose) {
             this.emit('log', message);
@@ -584,6 +598,10 @@ export class ArmaDebugEngine extends EventEmitter {
 
             case RemoteCommands.AllFunctionsInNamespaceResult:
                 this.emit('fetchFunctionsInNS' + (message.handle || ''), message.data, message.error);
+                break;
+
+            case RemoteCommands.InstructionRefResult:
+                this.emit('instructionRefRes' + (message.handle || ''), message.data, message.error);
                 break;
 
             default:

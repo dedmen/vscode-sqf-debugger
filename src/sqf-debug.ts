@@ -126,7 +126,7 @@ export class SQFDebugSession extends DebugSession {
 			//response.body.supportsExceptionInfoRequest = true; //#TODO
 
 
-			//response.body.supportsDisassembleRequest
+			response.body.supportsDisassembleRequest = true;
 			//response.body.supportsSetVariable // todo
 			//response.body.supportsModulesRequest = false; // This seems to not exist anymore?
 			response.body.supportsLoadedSourcesRequest = true;
@@ -461,14 +461,31 @@ export class SQFDebugSession extends DebugSession {
 		return text_truncate(instructionName.replace('\n', ' ').replace('operator', '').trim());
 	}
 
-	protected getCallstackFrame(srcFrame: ICallStackItem, idx: number): StackFrame {
+	protected getCallstackFrame(srcFrame: ICallStackItem, idx: number): DebugProtocol.StackFrame {
 		if (srcFrame.lastInstruction) {
-			return new StackFrame(
-				idx,
-				SQFDebugSession.getStackframeName(srcFrame.lastInstruction.name, srcFrame.contentSample),
+			//return new StackFrame(
+			//	idx,
+			//	SQFDebugSession.getStackframeName(srcFrame.lastInstruction.name, srcFrame.contentSample),
+			//	//text_truncate(srcFrame.contentSample ? srcFrame.contentSample : srcFrame.lastInstruction.name.replace('\n', ' ')),
+			//	
+			//	srcFrame.lastInstruction.filename !== '' ? this.createSource(srcFrame.lastInstruction.filename) : 
+			//	(
+			//		// If there is no filename, the debugger probably sends us full content
+			//		srcFrame.content != null ? 
+			//			new Source("unknownPath", undefined, this.cacheSourceNoFile(srcFrame.content).id, 'arma', 'sqf-debugger-data')
+			//		:
+			//			undefined
+			//	),
+			//	this.convertDebuggerLineToClient(srcFrame.lastInstruction.fileOffset[0]),
+			//	this.convertDebuggerColumnToClient(srcFrame.lastInstruction.fileOffset[2]),
+			//);
+
+			return {
+				id: idx,
+				name: SQFDebugSession.getStackframeName(srcFrame.lastInstruction.name, srcFrame.contentSample),
 				//text_truncate(srcFrame.contentSample ? srcFrame.contentSample : srcFrame.lastInstruction.name.replace('\n', ' ')),
 				
-				srcFrame.lastInstruction.filename !== '' ? this.createSource(srcFrame.lastInstruction.filename) : 
+				source: srcFrame.lastInstruction.filename !== '' ? this.createSource(srcFrame.lastInstruction.filename) : 
 				(
 					// If there is no filename, the debugger probably sends us full content
 					srcFrame.content != null ? 
@@ -476,9 +493,12 @@ export class SQFDebugSession extends DebugSession {
 					:
 						undefined
 				),
-				this.convertDebuggerLineToClient(srcFrame.lastInstruction.fileOffset[0]),
-				this.convertDebuggerColumnToClient(srcFrame.lastInstruction.fileOffset[2])
-			);
+				line: this.convertDebuggerLineToClient(srcFrame.lastInstruction.fileOffset[0]),
+				column: this.convertDebuggerColumnToClient(srcFrame.lastInstruction.fileOffset[2]),
+				instructionPointerReference: `${srcFrame.instructionRef}_${srcFrame.ip}`
+			};
+
+
 		} else {
 			return new StackFrame(idx, 'unknown');
 		}
@@ -623,7 +643,6 @@ export class SQFDebugSession extends DebugSession {
 
 		functions.then(c => {
 			const sources = c.map(f => {
-				f.path.startsWith("")
 				return new Source(path.basename(f.path.toLowerCase()), f.path.toLowerCase(), this.cacheSourceInsertNoFetch(f.path.toLowerCase()).id, 'arma', 'sqf-debugger-data' );
 			})
 
@@ -634,10 +653,56 @@ export class SQFDebugSession extends DebugSession {
 		});
 	}
 
+	protected disassembleRequest(response: DebugProtocol.DisassembleResponse, args: DebugProtocol.DisassembleArguments, request?: DebugProtocol.Request) {
+		this.log(`Disassemble request`);
+
+		this.debugger?.getInstructionRefContent(args.memoryReference).then(c => {
+
+			let instructions = c.map((inst, i) : DebugProtocol.DisassembledInstruction => {
+				return {
+					address: `${i}`,
+					instruction: inst.name,
+					line: inst.fileOffset[0],
+					column: inst.fileOffset[2],
+					location: i != 0 ? undefined : (
+						this.createSource(inst.filename)
+					)
+				};
+			});
+
+			response.body = {
+				 instructions:
+				 [
+					...
+					(args.instructionOffset != null && args.instructionOffset < 0) ? (
+						Array.from({length: -args.instructionOffset}, (_, i) : DebugProtocol.DisassembledInstruction => {
+							return {
+								address: `-${i}`,
+								instruction: "XXX",
+								presentationHint: 'invalid'
+							}
+						})
+					) : [],
+					...instructions,
+					...Array.from({length: args.instructionCount - -(args.instructionOffset || 0) - instructions.length}, (_, i) : DebugProtocol.DisassembledInstruction => {
+						return {
+							address: `${instructions.length + i}`,
+							instruction: "XXX",
+							presentationHint: 'invalid'
+						}
+					})
+				 ]
+				 
+				  };
+			this.sendResponse(response);
+		}).catch(err => {
+			this.sendResolveError(response, '', err);
+		});
+
+	}
+
 	protected customRequest(command: string, response: DebugProtocol.Response, args: any, request?: DebugProtocol.Request) {
-
 		this.log(`Custom request? ${command}`);
-
 	}
 
 
