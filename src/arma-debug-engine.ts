@@ -574,7 +574,7 @@ export class ArmaDebugEngine extends EventEmitter {
                 this.emit('variables' + (message.handle || ''), message.data);
                 break;
 
-            case RemoteCommands.VariablesReturn:
+            case RemoteCommands.ExecuteCodeResult:
                 this.emit('eval' + (message.handle || ''), message.data, message.error);
                 break;
 
