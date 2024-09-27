@@ -12,6 +12,7 @@ import { DebugProtocol } from 'vscode-debugprotocol';
 import { ArmaDebugEngine, ICallStackItem, IVariable, VariableScope, ScriptErrorType, IValue, ContinueExecutionType, BreakpointAction, IBreakpointActionExecCode, IBreakpointActionHalt, IBreakpointActionLogCallstack, IBreakpointConditionHitCount, IBreakpointConditionCode, BreakpointCondition, ISourceCode, IRemoteMessage, IError } from './arma-debug-engine';
 import { trueCasePathSync } from 'true-case-path';
 import { Message } from 'vscode-debugadapter/lib/messages';
+import { existsSync } from 'fs';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	//rptPath?: string
@@ -127,8 +128,8 @@ export class SQFDebugSession extends DebugSession {
 
 			//response.body.supportsDisassembleRequest
 			//response.body.supportsSetVariable // todo
-			//response.body.supportsModulesRequest // #TODO all functions?
-			//response.body.supportsLoadedSourcesRequest // #TODO all functions?
+			//response.body.supportsModulesRequest = false; // This seems to not exist anymore?
+			response.body.supportsLoadedSourcesRequest = true;
 
 
 
@@ -320,6 +321,12 @@ export class SQFDebugSession extends DebugSession {
 	protected sourceRequest(response: DebugProtocol.SourceResponse, args: DebugProtocol.SourceArguments, request?: DebugProtocol.Request): void {
 		this.log(`Source requested for ${args.source?.name} (${args.sourceReference})`);
 
+		if (args.source && args.source.path) // It wants a file by path, grab its sourceReference id from cache
+		{ 
+			args.sourceReference = this.cacheSource(args.source.path).id
+		} 
+
+		// Get from cache by reference
 		const source = this.getCachedSource(args.sourceReference);
 		if (source?.code) {
 			source.code.then(c => {
@@ -335,6 +342,13 @@ export class SQFDebugSession extends DebugSession {
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments) {
 		// Remove previously set breakpoints for this file
+
+		if (!args.source.path && args.source.sourceReference) {
+			// We need the path, but we only got a reference, look up the reference
+			const source = this.getCachedSource(args.source.sourceReference);
+			args.source.path = source?.path;
+		}
+
 		if (!args.source.path) {
 			this.log("args.source.path not set");
 			return;
@@ -345,7 +359,8 @@ export class SQFDebugSession extends DebugSession {
 			return;
 		}
 
-		const path = this.convertClientPathToDebugger(args.source.path);
+		// If the source file, came from Arma (via LoadFile request) then the path is not local and we don't need to convert it
+		const path = args.source.origin === 'arma' ? args.source.path : this.convertClientPathToDebugger(args.source.path);
 
 		this.log(`Setting breakpoints for ${path}...`);
 
@@ -381,7 +396,8 @@ export class SQFDebugSession extends DebugSession {
 			return {
 				verified: true,
 				line: breakpoint.line,
-				id
+				id,
+				source: args.source
 			};
 		}) || [];
 
@@ -399,15 +415,12 @@ export class SQFDebugSession extends DebugSession {
 			return;
 		}
 
-
-		// Build new breakpoints
+		// Build new filter array
 		let filters: number[] = args.filters?.map(filterName => {
-			
 			return ScriptErrorType[filterName as keyof typeof ScriptErrorType];
 		}) || [];
 
 		this.debugger?.setExceptionFilter(filters);
-
 
 		response.body = {
 			/*
@@ -599,6 +612,34 @@ export class SQFDebugSession extends DebugSession {
 			});
 		}
 	}
+
+	protected loadedSourcesRequest(response: DebugProtocol.LoadedSourcesResponse, args: DebugProtocol.LoadedSourcesArguments, request?: DebugProtocol.Request) {
+		if (!this.debugger?.connected) {
+			this.sendDebuggerNotConnected(response);
+			return;
+		}
+
+		const functions = this.debugger.getCodeVariables();
+
+		functions.then(c => {
+			const sources = c.map(f => {
+				f.path.startsWith("")
+				return new Source(path.basename(f.path.toLowerCase()), f.path.toLowerCase(), this.cacheSourceInsertNoFetch(f.path.toLowerCase()).id, 'arma', 'sqf-debugger-data' );
+			})
+
+			response.body = { sources: sources };
+			this.sendResponse(response);
+		}).catch(err => {
+			this.sendResolveError(response, '', err);
+		});
+	}
+
+	protected customRequest(command: string, response: DebugProtocol.Response, args: any, request?: DebugProtocol.Request) {
+
+		this.log(`Custom request? ${command}`);
+
+	}
+
 
 	// Implementation details --------------
 	protected log(msg: string) {
@@ -862,6 +903,9 @@ export class SQFDebugSession extends DebugSession {
 		if (path.startsWith(this.missionRoot)) {
 			path = path.substr(this.missionRoot.length);
 		}
+		if (!existsSync(`${this.missionRoot}${path}`))
+			return clientPath; // Its not actually a local file, leave it as is (maybe a breakpoint from a script loaded from game)
+
 		return `${this.scriptPrefix}${path}`;
 	}
 
@@ -871,6 +915,22 @@ export class SQFDebugSession extends DebugSession {
 			sourceFile = this.missionRoot + sourceFile.substr(this.scriptPrefix.length);
 		}
 		return trueCasePathSync(sourceFile);
+	}
+
+	private cacheSourceInsertNoFetch(path: string): ISource {
+		if (!this.getSourceFromADE) {
+			return { id: 0, path };
+		}
+
+		let index = this.sourceIndex.findIndex(v => v.path.toLowerCase() === path.toLowerCase());
+		if (index < 0) {
+			index = this.sourceIndex.length;
+			this.sourceIndex.push({ path, id: index + 1 });
+		}
+
+		const sourceCache = this.sourceIndex[index];
+		// We do not fetch here, this is just to note that this file exists
+		return sourceCache;
 	}
 
 	private cacheSource(path: string): ISource {
@@ -936,7 +996,8 @@ export class SQFDebugSession extends DebugSession {
 			try {
 				mappedPath = this.convertDebuggerPathToClient(filePath);
 			} catch (error) {
-				sourceRef = this.cacheSource(filePath).id;
+				sourceRef = this.cacheSource(filePath.toLowerCase()).id;
+				mappedPath = filePath.toLowerCase(); // This is annoying. But some code instructions have the path lowercased, other instructions have it uppercase. If it missmatches we will open the same source file twice
 			}
 			return new Source(path.basename(filePath), mappedPath, sourceRef, 'arma', 'sqf-debugger-data');
 		} else {

@@ -62,7 +62,8 @@ enum Commands {
     LoadFile = 13, // load a file and return the contents
     clearAllBreakpoints = 14,
     clearFileBreakpoints = 15,
-    SetExceptionFilter = 16
+    SetExceptionFilter = 16,
+    FetchAllFunctionsInNamespace = 17
 }
 
 export enum ContinueExecutionType {
@@ -87,7 +88,8 @@ enum RemoteCommands {
     BreakpointLog = 11, // A log breakpoint was triggered
     LogMessage = 12, // A log message from the game, for example from echo script command
     ExecuteCodeResult = 13, // Result of ExecuteCode command
-    LoadFileResult = 14
+    LoadFileResult = 14,
+    AllFunctionsInNamespaceResult = 15
 }
 
 enum DebuggerState {
@@ -226,6 +228,12 @@ interface ICodeRequest {
 export interface ISourceCode {
     content: string;
     path: string;
+}
+
+export interface ICodeVariable {
+    name: string;
+    path: string;
+    ns: VariableScope;
 }
 
 export class ArmaDebugEngine extends EventEmitter {
@@ -463,6 +471,20 @@ export class ArmaDebugEngine extends EventEmitter {
         });
     }
 
+    getCodeVariables(): Promise<ICodeVariable[]> {
+        return new Promise((resolve, reject) => {
+            //setTimeout(() => reject('Timed out'), 10000);
+            let request:IVariableListRequest = { 
+                scope: VariableScope.MissionNamespace
+            };
+            let handle = this.nextHandle();
+            this.once('fetchFunctionsInNS' + handle, message => {
+                resolve(message.modules as ICodeVariable[]);
+            });
+            this.sendCommand(handle, Commands.FetchAllFunctionsInNamespace, request);
+        });
+    }
+
     private l(message: string) {
         if(this.logging || this.verbose) {
             this.emit('log', message);
@@ -558,6 +580,10 @@ export class ArmaDebugEngine extends EventEmitter {
 
             case RemoteCommands.LoadFileResult:
                 this.emit('load' + (message.handle || ''), message.data, message.error);
+                break;
+
+            case RemoteCommands.AllFunctionsInNamespaceResult:
+                this.emit('fetchFunctionsInNS' + (message.handle || ''), message.data, message.error);
                 break;
 
             default:
